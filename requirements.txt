@@ -1,0 +1,9 @@
+asyncio
+websockets
+pandas
+numpy
+sqlite3
+requests
+flask
+smtplib
+email
