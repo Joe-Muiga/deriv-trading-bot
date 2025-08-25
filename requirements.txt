@@ -4,5 +4,8 @@ pandas
 numpy
 requests
 flask
-smtplib
 email
+numpy==2.3.2
+requests==2.32.5
+flask==3.1.2
+# Remove any line containing smtplib
