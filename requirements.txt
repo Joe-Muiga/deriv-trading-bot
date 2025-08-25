@@ -1,9 +1,4 @@
-# Build tools - keep these at the top
-setuptools==68.2.2
-wheel==0.41.2
-pip==22.0.0
-
-# Your application dependencies
+# Application dependencies only
 asyncio-mqtt==0.16.1
 websockets==11.0.3
 pandas==2.0.3
