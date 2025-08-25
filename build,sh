@@ -1,3 +1,19 @@
 #!/bin/bash
-pip install --upgrade pip setuptools wheel
-pip install -r requirements.txt
+set -e
+
+echo "Starting custom build process..."
+
+# Remove any cached pip files
+rm -rf ~/.cache/pip
+
+# Upgrade pip and install build tools first
+python -m pip install --upgrade pip
+python -m pip install --no-cache-dir setuptools==68.2.2 wheel==0.41.2
+
+# Verify setuptools installation
+python -c "import setuptools; print(f'setuptools version: {setuptools.__version__}')"
+
+# Install requirements
+python -m pip install --no-cache-dir -r requirements.txt
+
+echo "Build completed successfully!"
