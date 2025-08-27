@@ -6,7 +6,7 @@ import numpy as np
 import logging
 import sqlite3
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -55,11 +55,11 @@ class NotificationManager:
         if not self.email_config:
             return
         try:
-            msg = MimeMultipart()
+            msg = MIMEMultipart()
             msg['From'] = self.email_config['from_email']
             msg['To'] = self.email_config['to_email']
             msg['Subject'] = subject
-            msg.attach(MimeText(message, 'plain'))
+            msg.attach(MIMEText(message, 'plain'))
             
             server = smtplib.SMTP(self.email_config['smtp_server'], self.email_config['smtp_port'])
             server.starttls()
@@ -117,6 +117,7 @@ class RiskManager:
 class TechnicalAnalyzer:
     def __init__(self, deriv_api):
         self.deriv_api = deriv_api
+        self.event_loop = None
     
     def detect_patterns(self, df: pd.DataFrame) -> Dict:
         if len(df) < 20:
@@ -133,12 +134,12 @@ class TechnicalAnalyzer:
         
         return {'pattern': 'consolidation', 'signal': 'none'}
     
-    def generate_signal(self, symbol: str) -> Dict:
+    async def generate_signal_async(self, symbol: str) -> Dict:
         signal = {'symbol': symbol, 'action': 'none', 'entry_price': 0, 
                  'take_profit': 0, 'stop_loss': 0, 'confidence': 0}
         
         try:
-            df = self.deriv_api.get_candles(symbol, granularity=60, count=100)
+            df = await self.deriv_api._get_candles_async(symbol, granularity=60, count=100)
             if df.empty:
                 return signal
             
@@ -213,17 +214,6 @@ class DerivAPI:
             self.balance = response['balance']['balance']
             logging.info(f"Balance: {self.balance}")
         return self.balance
-    
-    def get_candles(self, symbol: str, granularity: int = 60, count: int = 100) -> pd.DataFrame:
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(self._get_candles_async(symbol, granularity, count))
-            loop.close()
-            return result
-        except Exception as e:
-            logging.error(f"Error getting candles: {e}")
-            return pd.DataFrame()
     
     async def _get_candles_async(self, symbol: str, granularity: int = 60, count: int = 100) -> pd.DataFrame:
         request = {"ticks_history": symbol, "adjust_start_time": 1, "count": count,
@@ -347,11 +337,11 @@ class DerivDonkeyBot:
         except Exception as e:
             logging.error(f"Position monitoring error: {e}")
     
-    def scan_for_signals(self):
+    async def scan_for_signals_async(self):
         signals = []
         for symbol in self.symbols:
             try:
-                signal = self.technical_analyzer.generate_signal(symbol)
+                signal = await self.technical_analyzer.generate_signal_async(symbol)
                 if signal['action'] != 'none':
                     signals.append(signal)
             except Exception as e:
@@ -361,7 +351,7 @@ class DerivDonkeyBot:
     async def run_trading_cycle(self):
         try:
             await self.monitor_positions()
-            signals = self.scan_for_signals()
+            signals = await self.scan_for_signals_async()
             for signal in signals:
                 if signal['confidence'] >= 70:
                     await self.place_contract(signal)
