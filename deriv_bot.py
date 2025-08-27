@@ -104,10 +104,10 @@ class RiskManager:
         daily_loss_percent = (self.current_daily_loss / self.daily_start_balance) * 100
         return daily_loss_percent < self.max_daily_loss_percent
     
-    def calculate_position_size(self, account_balance: float, risk_per_trade: float = 0.5) -> float:
+    def calculate_position_size(self, account_balance: float, risk_per_trade: float = 1.0) -> float:  # Increased to 1%
         calculated_risk = (account_balance * risk_per_trade / 100)
         min_trade = 0.35
-        max_trade = 1.00
+        max_trade = 2.00  # Increased max trade size
         return max(min_trade, min(calculated_risk, max_trade))
     
     def update_daily_loss(self, loss_amount: float):
@@ -120,26 +120,62 @@ class TechnicalAnalyzer:
         self.event_loop = None
     
     def detect_patterns(self, df: pd.DataFrame) -> Dict:
-        if len(df) < 20:
+        if len(df) < 10:
             return {'pattern': 'none', 'signal': 'none'}
         
-        recent_highs = df['high'].tail(10).max()
-        recent_lows = df['low'].tail(10).min()
-        current_price = df['close'].iloc[-1]
+        # Super aggressive contrarian signals
+        close = df['close'].values
+        high = df['high'].values
+        low = df['low'].values
         
-        if current_price > (recent_lows + (recent_highs - recent_lows) * 0.7):
-            return {'pattern': 'bullish_breakout', 'signal': 'buy'}
-        if current_price < (recent_lows + (recent_highs - recent_lows) * 0.3):
-            return {'pattern': 'bearish_breakdown', 'signal': 'sell'}
+        # Multiple aggressive signal types
+        current_price = close[-1]
+        prev_price = close[-2] if len(close) > 1 else current_price
+        price_change = (current_price - prev_price) / prev_price * 100
         
-        return {'pattern': 'consolidation', 'signal': 'none'}
+        # 5-period moving average for quick signals
+        if len(close) >= 5:
+            ma5 = np.mean(close[-5:])
+            ma3 = np.mean(close[-3:])
+            
+            # Contrarian: Price above MA = SELL, below MA = BUY
+            if current_price > ma5 * 1.001:  # Even 0.1% above MA
+                return {'pattern': 'overbought_contrarian', 'signal': 'sell'}
+            if current_price < ma5 * 0.999:  # Even 0.1% below MA
+                return {'pattern': 'oversold_contrarian', 'signal': 'buy'}
+        
+        # Momentum contrarian - fade strong moves
+        if price_change > 0.05:  # Any upward move > 0.05%
+            return {'pattern': 'momentum_fade', 'signal': 'sell'}
+        if price_change < -0.05:  # Any downward move > 0.05%
+            return {'pattern': 'momentum_fade', 'signal': 'buy'}
+        
+        # Range contrarian - trade against range extremes
+        recent_high = np.max(high[-5:])
+        recent_low = np.min(low[-5:])
+        range_size = recent_high - recent_low
+        
+        if range_size > 0:
+            if current_price > (recent_low + range_size * 0.6):  # Upper 40% of range
+                return {'pattern': 'range_top', 'signal': 'sell'}
+            if current_price < (recent_low + range_size * 0.4):  # Lower 40% of range  
+                return {'pattern': 'range_bottom', 'signal': 'buy'}
+        
+        # Default contrarian on any price movement
+        if len(close) >= 3:
+            if close[-1] > close[-2]:
+                return {'pattern': 'up_contrarian', 'signal': 'sell'}
+            if close[-1] < close[-2]:
+                return {'pattern': 'down_contrarian', 'signal': 'buy'}
+        
+        return {'pattern': 'sideways', 'signal': 'buy'}  # Default to buy when sideways
     
     async def generate_signal_async(self, symbol: str) -> Dict:
         signal = {'symbol': symbol, 'action': 'none', 'entry_price': 0, 
                  'take_profit': 0, 'stop_loss': 0, 'confidence': 0}
         
         try:
-            df = await self.deriv_api._get_candles_async(symbol, granularity=60, count=100)
+            df = await self.deriv_api._get_candles_async(symbol, granularity=60, count=50)
             if df.empty:
                 return signal
             
@@ -147,19 +183,24 @@ class TechnicalAnalyzer:
             current_price = df['close'].iloc[-1]
             donkey_params = TradingStrategyAnalyzer().calculate_donkey_parameters()
             
+            # Super aggressive entry - reduced offsets
+            entry_offset = donkey_params['entry_offset'] * 0.3  # Much smaller offset
+            tp_distance = donkey_params['tp_distance'] * 0.8    # Smaller TP
+            sl_distance = donkey_params['sl_distance'] * 1.2    # Bigger SL for more room
+            
             if patterns['signal'] == 'buy':
-                entry_price = current_price + donkey_params['entry_offset']
-                take_profit = entry_price + donkey_params['tp_distance']
-                stop_loss = entry_price - donkey_params['sl_distance']
+                entry_price = current_price + entry_offset
+                take_profit = entry_price + tp_distance
+                stop_loss = entry_price - sl_distance
                 signal.update({'action': 'buy', 'entry_price': round(entry_price, 5),
-                              'take_profit': round(take_profit, 5), 'stop_loss': round(stop_loss, 5), 'confidence': 75})
+                              'take_profit': round(take_profit, 5), 'stop_loss': round(stop_loss, 5), 'confidence': 85})
                 
             elif patterns['signal'] == 'sell':
-                entry_price = current_price - donkey_params['entry_offset']
-                take_profit = entry_price - donkey_params['tp_distance']
-                stop_loss = entry_price + donkey_params['sl_distance']
+                entry_price = current_price - entry_offset
+                take_profit = entry_price - tp_distance
+                stop_loss = entry_price + sl_distance
                 signal.update({'action': 'sell', 'entry_price': round(entry_price, 5),
-                              'take_profit': round(take_profit, 5), 'stop_loss': round(stop_loss, 5), 'confidence': 75})
+                              'take_profit': round(take_profit, 5), 'stop_loss': round(stop_loss, 5), 'confidence': 85})
         except Exception as e:
             logging.error(f"Signal generation error for {symbol}: {e}")
         
@@ -353,9 +394,9 @@ class DerivDonkeyBot:
             await self.monitor_positions()
             signals = await self.scan_for_signals_async()
             for signal in signals:
-                if signal['confidence'] >= 70:
+                if signal['confidence'] >= 50:  # Much lower threshold
                     await self.place_contract(signal)
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(2)  # Slightly longer delay between trades
         except Exception as e:
             logging.error(f"Trading cycle error: {e}")
     
@@ -364,16 +405,16 @@ class DerivDonkeyBot:
             return False
         
         self.is_running = True
-        self.notification_manager.notify("Bot Started", "🐴 Donkey Strategy Bot is running!")
-        logging.info("Bot started successfully")
+        self.notification_manager.notify("Bot Started", "🐴 AGGRESSIVE Donkey Strategy Bot is running!")
+        logging.info("Aggressive bot started successfully")
         
         while self.is_running:
             try:
                 await self.run_trading_cycle()
-                await asyncio.sleep(60)
+                await asyncio.sleep(30)  # Check every 30 seconds instead of 60
             except Exception as e:
                 logging.error(f"Main loop error: {e}")
-                await asyncio.sleep(60)
+                await asyncio.sleep(30)
         
         await self.deriv_api.disconnect()
     
