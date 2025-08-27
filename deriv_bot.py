@@ -8,8 +8,8 @@ import sqlite3
 from datetime import datetime
 from typing import Dict, List, Tuple
 import smtplib
-from email.mime.text import MimeText
-from email.mime.multipart import MimeMultipart
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import requests
 from flask import Flask
 import threading
