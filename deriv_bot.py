@@ -220,10 +220,18 @@ class DerivAPI:
     
     async def buy_contract(self, symbol: str, contract_type: str, amount: float, 
                           barrier: float = None, duration: int = None) -> Dict:
-        request = {"buy": 1, "parameters": {"contract_type": contract_type, "symbol": symbol, "amount": amount}}
-        if duration:
-            request["parameters"]["duration"] = duration
-            request["parameters"]["duration_unit"] = "m"
+        # Fix for Deriv API - use proper contract parameters
+        request = {
+            "buy": 1, 
+            "parameters": {
+                "contract_type": contract_type,
+                "symbol": symbol, 
+                "amount": amount,
+                "duration": duration or 1,
+                "duration_unit": "m",
+                "currency": "USD"
+            }
+        }
         
         response = await self.send_request(request)
         if response.get('buy'):
