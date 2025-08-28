@@ -165,31 +165,106 @@ class DerivAPI:
         self.balance = 0
         self.req_id = 0
         self.current_prices = {}  # Store current prices for contracts
+        self.connection_lock = asyncio.Lock()
+        self.ping_task = None
         
     async def connect(self):
         try:
-            self.websocket = await websockets.connect(self.ws_url)
+            if self.websocket and not self.websocket.closed:
+                await self.websocket.close()
+            
+            # Add connection timeout and proper error handling
+            self.websocket = await asyncio.wait_for(
+                websockets.connect(
+                    self.ws_url,
+                    ping_interval=20,  # Send ping every 20 seconds
+                    ping_timeout=10,   # Wait 10 seconds for pong
+                    close_timeout=10,  # Wait 10 seconds for close
+                    max_size=2**20     # 1MB message size limit
+                ), 
+                timeout=30
+            )
+            
             self.is_connected = True
-            await self.authorize()
-            await self.get_balance()
-            logging.info("Connected to Deriv API")
-            return True
+            
+            # Start keepalive ping task
+            self.ping_task = asyncio.create_task(self._keepalive())
+            
+            # Authorize and get balance
+            auth_success = await self.authorize()
+            if auth_success:
+                await self.get_balance()
+                logging.info("✅ Connected and authorized with Deriv API")
+                return True
+            else:
+                logging.error("❌ Authorization failed")
+                return False
+                
+        except asyncio.TimeoutError:
+            logging.error("❌ Connection timeout")
+            return False
         except Exception as e:
-            logging.error(f"Connection failed: {e}")
+            logging.error(f"❌ Connection failed: {e}")
             return False
     
-    async def send_request(self, request: Dict) -> Dict:
-        if not self.is_connected:
-            return {}
+    async def _keepalive(self):
+        """Keep connection alive with periodic pings"""
         try:
-            self.req_id += 1
-            request['req_id'] = self.req_id
-            await self.websocket.send(json.dumps(request))
-            response = await self.websocket.recv()
-            return json.loads(response)
+            while self.is_connected and self.websocket and not self.websocket.closed:
+                await asyncio.sleep(30)  # Ping every 30 seconds
+                if self.websocket and not self.websocket.closed:
+                    try:
+                        await self.websocket.ping()
+                        logging.debug("📡 Keepalive ping sent")
+                    except Exception as e:
+                        logging.warning(f"⚠️ Keepalive ping failed: {e}")
+                        break
         except Exception as e:
-            logging.error(f"API request error: {e}")
-            return {}
+            logging.error(f"❌ Keepalive task error: {e}")
+    
+    async def ensure_connected(self):
+        """Ensure connection is active, reconnect if needed"""
+        if not self.is_connected or not self.websocket or self.websocket.closed:
+            logging.warning("🔄 Connection lost, attempting reconnect...")
+            return await self.connect()
+        return True
+    
+    async def send_request(self, request: Dict) -> Dict:
+        async with self.connection_lock:
+            # Ensure we're connected before sending
+            if not await self.ensure_connected():
+                return {"error": {"message": "Connection failed"}}
+            
+            try:
+                self.req_id += 1
+                request['req_id'] = self.req_id
+                
+                # Send request with timeout
+                await asyncio.wait_for(
+                    self.websocket.send(json.dumps(request)), 
+                    timeout=10
+                )
+                
+                # Receive response with timeout
+                response_str = await asyncio.wait_for(
+                    self.websocket.recv(), 
+                    timeout=15
+                )
+                
+                response = json.loads(response_str)
+                logging.debug(f"📨 API Response: {response}")
+                return response
+                
+            except asyncio.TimeoutError:
+                logging.error("⏰ API request timeout")
+                return {"error": {"message": "Request timeout"}}
+            except websockets.exceptions.ConnectionClosed:
+                logging.error("🔌 WebSocket connection closed")
+                self.is_connected = False
+                return {"error": {"message": "Connection closed"}}
+            except Exception as e:
+                logging.error(f"❌ API request error: {e}")
+                return {"error": {"message": str(e)}}
     
     async def authorize(self):
         response = await self.send_request({"authorize": self.api_token})
@@ -207,17 +282,52 @@ class DerivAPI:
         return self.balance
     
     async def get_current_price(self, symbol: str) -> float:
-        """Get current price for a symbol"""
+        """Get current price for a symbol with improved error handling"""
         try:
-            request = {"ticks": symbol, "subscribe": 1}
+            # First try to get price from ticks_history (more reliable)
+            request = {
+                "ticks_history": symbol, 
+                "adjust_start_time": 1, 
+                "count": 1,
+                "end": "latest", 
+                "start": 1
+            }
+            
             response = await self.send_request(request)
+            
+            if response.get('history'):
+                prices = response['history'].get('prices', [])
+                if prices:
+                    price = float(prices[-1])
+                    self.current_prices[symbol] = price
+                    logging.info(f"💰 Got price for {symbol}: {price}")
+                    return price
+            
+            # Fallback: try live ticks subscription
+            request = {"ticks": symbol}
+            response = await self.send_request(request)
+            
             if response.get('tick'):
                 price = float(response['tick']['quote'])
                 self.current_prices[symbol] = price
+                logging.info(f"💰 Got live price for {symbol}: {price}")
                 return price
+            
+            # If we have a cached price, use it
+            if symbol in self.current_prices:
+                cached_price = self.current_prices[symbol]
+                logging.warning(f"⚠️ Using cached price for {symbol}: {cached_price}")
+                return cached_price
+            
+            logging.error(f"❌ Could not get any price for {symbol}")
             return 0.0
+            
         except Exception as e:
-            logging.error(f"Error getting price for {symbol}: {e}")
+            logging.error(f"❌ Error getting price for {symbol}: {e}")
+            
+            # Return cached price if available
+            if symbol in self.current_prices:
+                return self.current_prices[symbol]
             return 0.0
     
     async def _get_candles_async(self, symbol: str, granularity: int = 60, count: int = 10) -> pd.DataFrame:
@@ -283,9 +393,24 @@ class DerivAPI:
         return response.get('portfolio', {})
     
     async def disconnect(self):
-        if self.websocket:
-            await self.websocket.close()
+        try:
             self.is_connected = False
+            
+            # Cancel ping task
+            if self.ping_task and not self.ping_task.done():
+                self.ping_task.cancel()
+                try:
+                    await self.ping_task
+                except asyncio.CancelledError:
+                    pass
+            
+            # Close websocket
+            if self.websocket and not self.websocket.closed:
+                await self.websocket.close()
+                
+            logging.info("🔌 Disconnected from Deriv API")
+        except Exception as e:
+            logging.error(f"❌ Disconnect error: {e}")
 
 class DerivDonkeyBot:
     def __init__(self, config: Dict):
@@ -429,6 +554,12 @@ class DerivDonkeyBot:
     async def run_trading_cycle(self):
         try:
             logging.info("🔄 RUNNING ULTRA AGGRESSIVE CYCLE...")
+            
+            # Ensure connection is stable before trading
+            if not await self.deriv_api.ensure_connected():
+                logging.error("❌ Connection check failed, skipping cycle")
+                return
+            
             await self.monitor_positions()
             signals = await self.scan_for_signals_async()
             
@@ -436,12 +567,16 @@ class DerivDonkeyBot:
                 if signal['confidence'] >= 30:  # Very low threshold
                     success = await self.place_contract(signal)
                     if success:
-                        await asyncio.sleep(1)  # Quick delay between trades
+                        await asyncio.sleep(2)  # Slight delay between trades
                     else:
                         logging.warning("⚠️ Trade placement failed")
+                        # Small delay before next attempt
+                        await asyncio.sleep(5)
                         
         except Exception as e:
             logging.error(f"Trading cycle error: {e}")
+            # Add recovery delay
+            await asyncio.sleep(10)
     
     async def start(self):
         logging.info("🚀 STARTING ULTRA AGGRESSIVE BOT...")
@@ -454,15 +589,34 @@ class DerivDonkeyBot:
         logging.info("✅ ULTRA AGGRESSIVE BOT STARTED")
         
         cycle_count = 0
+        consecutive_errors = 0
+        max_consecutive_errors = 5
+        
         while self.is_running:
             try:
                 cycle_count += 1
                 logging.info(f"📈 CYCLE #{cycle_count} - HUNTING FOR TRADES...")
                 await self.run_trading_cycle()
-                await asyncio.sleep(15)  # Check every 15 seconds
+                consecutive_errors = 0  # Reset error count on success
+                await asyncio.sleep(20)  # Slightly longer delay to prevent API overload
+                
             except Exception as e:
-                logging.error(f"Main loop error: {e}")
-                await asyncio.sleep(15)
+                consecutive_errors += 1
+                logging.error(f"❌ Main loop error #{consecutive_errors}: {e}")
+                
+                if consecutive_errors >= max_consecutive_errors:
+                    logging.error(f"🚨 Too many consecutive errors ({consecutive_errors}), attempting reconnection...")
+                    # Try to reconnect
+                    if await self.deriv_api.connect():
+                        consecutive_errors = 0
+                        logging.info("✅ Reconnection successful")
+                    else:
+                        logging.error("❌ Reconnection failed, stopping bot")
+                        break
+                
+                # Progressive backoff delay
+                delay = min(30 + (consecutive_errors * 10), 120)
+                await asyncio.sleep(delay)
         
         await self.deriv_api.disconnect()
     
