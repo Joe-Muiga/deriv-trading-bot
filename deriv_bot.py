@@ -308,7 +308,7 @@ class DerivAPI:
             response = await self.send_request(request)
             
             if response.get('tick'):
-                price = float(response['tick']['quote'])
+                price = round(float(response['tick']['quote']), 2)  # Round to 2 decimal places
                 self.current_prices[symbol] = price
                 logging.info(f"💰 Got live price for {symbol}: {price}")
                 return price
@@ -366,12 +366,12 @@ class DerivAPI:
                 "duration_unit": "m",
                 "currency": "USD"
             },
-            "price": round(price, 5)  # Add the missing price parameter
+            "price": round(price, 2)  # Price must have max 2 decimal places
         }
         
         # Add barrier for barrier contracts
         if barrier is not None:
-            request["parameters"]["barrier"] = round(barrier, 5)
+            request["parameters"]["barrier"] = round(barrier, 2)  # Barrier also max 2 decimals
         
         logging.info(f"Sending buy request: {json.dumps(request, indent=2)}")
         
