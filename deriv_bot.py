@@ -164,6 +164,7 @@ class DerivAPI:
         self.is_connected = False
         self.balance = 0
         self.req_id = 0
+        self.current_prices = {}  # Store current prices for contracts
         
     async def connect(self):
         try:
@@ -205,6 +206,20 @@ class DerivAPI:
             logging.info(f"Balance: {self.balance}")
         return self.balance
     
+    async def get_current_price(self, symbol: str) -> float:
+        """Get current price for a symbol"""
+        try:
+            request = {"ticks": symbol, "subscribe": 1}
+            response = await self.send_request(request)
+            if response.get('tick'):
+                price = float(response['tick']['quote'])
+                self.current_prices[symbol] = price
+                return price
+            return 0.0
+        except Exception as e:
+            logging.error(f"Error getting price for {symbol}: {e}")
+            return 0.0
+    
     async def _get_candles_async(self, symbol: str, granularity: int = 60, count: int = 10) -> pd.DataFrame:
         request = {"ticks_history": symbol, "adjust_start_time": 1, "count": count,
                   "end": "latest", "start": 1, "style": "candles", "granularity": granularity}
@@ -219,26 +234,49 @@ class DerivAPI:
         return pd.DataFrame()
     
     async def buy_contract(self, symbol: str, contract_type: str, amount: float, 
-                          barrier: float = None, duration: int = None) -> Dict:
-        # Fix for Deriv API - use proper contract parameters
+                          barrier: float = None, duration: int = None, price: float = None) -> Dict:
+        """
+        Fixed buy_contract method with proper price parameter
+        """
+        # Get current price if not provided
+        if price is None:
+            price = await self.get_current_price(symbol)
+            if price == 0.0:
+                logging.error(f"Could not get price for {symbol}")
+                return {"error": {"message": "Could not get current price"}}
+        
+        # Build the contract request with all required parameters
         request = {
             "buy": 1, 
             "parameters": {
                 "contract_type": contract_type,
                 "symbol": symbol, 
-                "amount": amount,
+                "amount": round(amount, 2),  # Ensure amount is properly rounded
                 "duration": duration or 1,
                 "duration_unit": "m",
                 "currency": "USD"
-            }
+            },
+            "price": round(price, 5)  # Add the missing price parameter
         }
         
+        # Add barrier for barrier contracts
+        if barrier is not None:
+            request["parameters"]["barrier"] = round(barrier, 5)
+        
+        logging.info(f"Sending buy request: {json.dumps(request, indent=2)}")
+        
         response = await self.send_request(request)
+        
         if response.get('buy'):
             logging.info(f"🚀 CONTRACT BOUGHT: {response['buy']['contract_id']} for ${amount}")
+            return response
         elif response.get('error'):
-            logging.error(f"Buy failed: {response['error']}")
-        return response
+            error_msg = response['error'].get('message', 'Unknown error')
+            logging.error(f"Buy failed: {error_msg}")
+            return response
+        else:
+            logging.error(f"Unexpected response: {response}")
+            return {"error": {"message": "Unexpected response format"}}
     
     async def get_portfolio(self) -> Dict:
         response = await self.send_request({"portfolio": 1})
@@ -303,12 +341,19 @@ class DerivDonkeyBot:
             
             logging.info(f"🎯 ATTEMPTING TRADE: {signal['action'].upper()} {signal['symbol']} ${risk_amount}")
             
-            # Use simple CALL/PUT contracts with duration
+            # Get current price first
+            current_price = await self.deriv_api.get_current_price(signal['symbol'])
+            if current_price == 0.0:
+                logging.error(f"Cannot get price for {signal['symbol']}")
+                return False
+            
+            # Use simple CALL/PUT contracts with duration and proper price
             response = await self.deriv_api.buy_contract(
                 symbol=signal['symbol'], 
                 contract_type=contract_type,
                 amount=risk_amount, 
-                duration=1  # 1 minute contracts for ultra-fast trading
+                duration=1,  # 1 minute contracts for ultra-fast trading
+                price=current_price
             )
             
             if response.get('buy'):
@@ -328,7 +373,9 @@ class DerivDonkeyBot:
                 logging.info(f"✅ TRADE EXECUTED: #{self.trade_count}")
                 return True
             else:
-                logging.error(f"❌ TRADE FAILED: {response}")
+                error_msg = response.get('error', {}).get('message', 'Unknown error')
+                logging.error(f"❌ TRADE FAILED: {error_msg}")
+                return False
         except Exception as e:
             logging.error(f"Contract placement error: {e}")
         return False
