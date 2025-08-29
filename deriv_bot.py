@@ -60,10 +60,10 @@ class RiskManager:
         daily_loss_percent = (self.current_daily_loss / self.daily_start_balance) * 100
         return daily_loss_percent < self.max_daily_loss_percent
     
-    def calculate_position_size(self, account_balance: float, risk_per_trade: float = 5.0) -> float:
+    def calculate_position_size(self, account_balance: float, risk_per_trade: float = 2.0) -> float:
         calculated_risk = (account_balance * risk_per_trade / 100)
         min_trade = 0.35
-        max_trade = min(account_balance * 0.5, 3.00)
+        max_trade = min(account_balance * 0.1, 1.00)  # More conservative
         return max(min_trade, min(calculated_risk, max_trade))
     
     def update_daily_loss(self, loss_amount: float):
@@ -77,7 +77,7 @@ class TechnicalAnalyzer:
     
     def detect_patterns(self, df: pd.DataFrame) -> Dict:
         if len(df) < 3:
-            return {'pattern': 'instant_trade', 'signal': 'buy'}
+            return {'pattern': 'instant_trade', 'signal': 'call'}
         
         close = df['close'].values
         current_price = close[-1]
@@ -128,8 +128,9 @@ class DerivAPI:
         self.req_id = 0
         self.current_prices = {}
         self.connection_lock = asyncio.Lock()
-        self.pending_requests = {}  # Track pending requests by req_id
-        self.subscription_ids = {}  # Track active subscriptions
+        self.message_queue = asyncio.Queue()
+        self.response_futures = {}
+        self.is_listening = False
         
     async def connect(self):
         try:
@@ -148,6 +149,9 @@ class DerivAPI:
             
             self.is_connected = True
             
+            # Start message listener
+            asyncio.create_task(self._message_listener())
+            
             auth_success = await self.authorize()
             if auth_success:
                 await self.get_balance()
@@ -161,13 +165,55 @@ class DerivAPI:
             logging.error(f"❌ Connection failed: {e}")
             return False
     
+    async def _message_listener(self):
+        """Background task to handle incoming WebSocket messages"""
+        self.is_listening = True
+        try:
+            while self.is_listening and self.websocket and not self.websocket.closed:
+                try:
+                    message = await asyncio.wait_for(self.websocket.recv(), timeout=1.0)
+                    data = json.loads(message)
+                    
+                    req_id = data.get('req_id')
+                    msg_type = data.get('msg_type', '')
+                    
+                    # Handle tick updates
+                    if msg_type == 'tick' and 'tick' in data:
+                        symbol = data['tick'].get('symbol', '')
+                        price = data['tick'].get('quote', 0)
+                        if symbol and price:
+                            self.current_prices[symbol] = float(price)
+                        continue
+                    
+                    # Handle responses to specific requests
+                    if req_id and req_id in self.response_futures:
+                        future = self.response_futures.pop(req_id)
+                        if not future.done():
+                            future.set_result(data)
+                        continue
+                    
+                    # Log unhandled messages for debugging
+                    if msg_type not in ['tick', 'ping', 'pong']:
+                        logging.debug(f"Unhandled message: {msg_type}")
+                        
+                except asyncio.TimeoutError:
+                    continue
+                except Exception as e:
+                    logging.error(f"Message listener error: {e}")
+                    await asyncio.sleep(1)
+                    
+        except Exception as e:
+            logging.error(f"Message listener crashed: {e}")
+        finally:
+            self.is_listening = False
+    
     async def ensure_connected(self):
         if not self.is_connected or not self.websocket or self.websocket.closed:
             logging.warning("🔄 Connection lost, attempting reconnect...")
             return await self.connect()
         return True
     
-    async def send_request(self, request: Dict, expect_response: bool = True) -> Dict:
+    async def send_request(self, request: Dict, timeout: float = 15.0) -> Dict:
         async with self.connection_lock:
             if not await self.ensure_connected():
                 return {"error": {"message": "Connection failed"}}
@@ -176,68 +222,28 @@ class DerivAPI:
                 self.req_id += 1
                 request['req_id'] = self.req_id
                 
-                if expect_response:
-                    self.pending_requests[self.req_id] = {'request': request, 'response': None}
+                # Create future for response
+                future = asyncio.Future()
+                self.response_futures[self.req_id] = future
                 
-                await asyncio.wait_for(
-                    self.websocket.send(json.dumps(request)), 
-                    timeout=10
-                )
+                # Send request
+                await self.websocket.send(json.dumps(request))
                 
-                if not expect_response:
-                    return {"success": True}
-                
-                # Wait for the specific response
-                timeout_count = 0
-                max_timeout = 30  # 30 seconds total timeout
-                
-                while timeout_count < max_timeout:
-                    try:
-                        response_str = await asyncio.wait_for(
-                            self.websocket.recv(), 
-                            timeout=1
-                        )
-                        
-                        response = json.loads(response_str)
-                        response_req_id = response.get('req_id')
-                        
-                        # Handle tick subscriptions (these don't match our req_id)
-                        if response.get('msg_type') == 'tick' and 'subscription' in response:
-                            # Update current price from tick
-                            if 'tick' in response:
-                                symbol = response['tick'].get('symbol', '')
-                                price = response['tick'].get('quote', 0)
-                                if symbol and price:
-                                    self.current_prices[symbol] = float(price)
-                            continue
-                        
-                        # Check if this is the response we're waiting for
-                        if response_req_id == self.req_id:
-                            if self.req_id in self.pending_requests:
-                                del self.pending_requests[self.req_id]
-                            return response
-                        
-                        # Handle other responses (like balance updates, portfolio updates)
-                        if response_req_id and response_req_id in self.pending_requests:
-                            self.pending_requests[response_req_id]['response'] = response
-                        
-                    except asyncio.TimeoutError:
-                        timeout_count += 1
-                        continue
-                    except Exception as e:
-                        logging.error(f"Error receiving response: {e}")
-                        break
-                
-                # Cleanup pending request
-                if self.req_id in self.pending_requests:
-                    del self.pending_requests[self.req_id]
-                
-                return {"error": {"message": "Response timeout"}}
+                # Wait for response
+                try:
+                    response = await asyncio.wait_for(future, timeout=timeout)
+                    return response
+                except asyncio.TimeoutError:
+                    # Clean up
+                    if self.req_id in self.response_futures:
+                        del self.response_futures[self.req_id]
+                    return {"error": {"message": "Request timeout"}}
                 
             except Exception as e:
+                # Clean up on error
+                if self.req_id in self.response_futures:
+                    del self.response_futures[self.req_id]
                 logging.error(f"❌ API request error: {e}")
-                if self.req_id in self.pending_requests:
-                    del self.pending_requests[self.req_id]
                 return {"error": {"message": str(e)}}
     
     async def authorize(self):
@@ -251,32 +257,34 @@ class DerivAPI:
         response = await self.send_request({"balance": 1})
         if response.get('balance'):
             self.balance = response['balance']['balance']
-            logging.info(f"Balance: {self.balance}")
+            logging.info(f"Balance: ${self.balance}")
         return self.balance
     
-    async def get_current_price(self, symbol: str) -> float:
+    async def get_contracts_for(self, symbol: str) -> Dict:
+        """Get available contracts for a symbol"""
         try:
-            # First, check if we already have a recent price
-            if symbol in self.current_prices:
-                return self.current_prices[symbol]
-            
-            # Subscribe to tick updates
-            request = {"ticks": symbol, "subscribe": 1}
+            request = {"contracts_for": symbol}
+            response = await self.send_request(request)
+            return response
+        except Exception as e:
+            logging.error(f"Error getting contracts for {symbol}: {e}")
+            return {}
+    
+    async def get_current_price(self, symbol: str) -> float:
+        """Get current price using simple tick request (not subscription)"""
+        try:
+            # Use ticks without subscription for immediate price
+            request = {"ticks": symbol}
             response = await self.send_request(request)
             
             if response.get('tick'):
                 price = float(response['tick']['quote'])
                 self.current_prices[symbol] = price
-                
-                # Store subscription ID for cleanup later
-                if response.get('subscription'):
-                    self.subscription_ids[symbol] = response['subscription']['id']
-                
                 logging.info(f"💰 Current price for {symbol}: {price}")
                 return price
             
             if response.get('error'):
-                logging.error(f"Error subscribing to {symbol}: {response['error']}")
+                logging.error(f"Error getting price for {symbol}: {response['error']}")
             
             return self.current_prices.get(symbol, 0.0)
             
@@ -307,32 +315,42 @@ class DerivAPI:
     
     async def buy_contract(self, symbol: str, contract_type: str, amount: float) -> Dict:
         """
-        Fixed buy_contract with proper request handling
+        Enhanced buy_contract with proper validation
         """
         try:
-            # Ensure we have current price
+            # Get current price first and validate
             current_price = await self.get_current_price(symbol)
             if current_price <= 0:
-                return {"error": {"message": "Could not get current price"}}
+                return {"error": {"message": "Could not get valid current price"}}
             
-            # Build proper contract request with stake (not payout)
+            # Get contracts info to validate what's available
+            contracts_info = await self.get_contracts_for(symbol)
+            if contracts_info.get('error'):
+                logging.error(f"Could not get contracts info: {contracts_info['error']}")
+                return {"error": {"message": "Could not validate contracts"}}
+            
+            # Validate amount bounds
+            amount = max(0.35, min(amount, 10.0))  # Ensure within reasonable bounds
+            
+            # Build contract request with all required parameters
             request = {
                 "buy": 1, 
                 "parameters": {
-                    "contract_type": contract_type.upper(),  # CALL or PUT
+                    "contract_type": contract_type.upper(),
                     "symbol": symbol, 
-                    "amount": round(amount, 2),  # This is the stake amount
+                    "amount": round(amount, 2),
                     "duration": 1,
                     "duration_unit": "m",
                     "currency": "USD",
-                    "basis": "stake"  # Important: specify this is stake-based
+                    "basis": "stake"
                 }
             }
             
-            logging.info(f"🎯 Buying {contract_type} for {symbol} with stake ${amount}")
+            logging.info(f"🎯 Attempting to buy {contract_type} for {symbol}")
+            logging.info(f"Current price: {current_price}, Stake: ${amount}")
             logging.debug(f"Buy request: {json.dumps(request, indent=2)}")
             
-            response = await self.send_request(request)
+            response = await self.send_request(request, timeout=20.0)  # Longer timeout for buy
             
             if response.get('buy'):
                 contract_id = response['buy']['contract_id']
@@ -341,34 +359,37 @@ class DerivAPI:
                 return response
             elif response.get('error'):
                 error_msg = response['error'].get('message', 'Unknown error')
-                logging.error(f"❌ Buy failed: {error_msg}")
+                error_code = response['error'].get('code', '')
+                logging.error(f"❌ Buy failed: {error_msg} (Code: {error_code})")
+                
+                # Handle specific validation errors
+                if 'price' in error_msg.lower():
+                    logging.error(f"Price validation issue - Current price: {current_price}")
+                
                 return response
             else:
-                logging.error(f"❌ Unexpected buy response: {response}")
-                return {"error": {"message": f"Unexpected response format: {response}"}}
+                logging.error(f"❌ Unexpected buy response format: {response}")
+                return {"error": {"message": "Unexpected response format"}}
                 
         except Exception as e:
-            logging.error(f"❌ Contract purchase error: {e}")
+            logging.error(f"❌ Contract purchase exception: {e}")
             return {"error": {"message": str(e)}}
     
     async def get_portfolio(self) -> Dict:
         response = await self.send_request({"portfolio": 1})
         return response.get('portfolio', {})
     
-    async def cleanup_subscriptions(self):
-        """Clean up active subscriptions"""
-        try:
-            for symbol, sub_id in self.subscription_ids.items():
-                forget_request = {"forget": sub_id}
-                await self.send_request(forget_request, expect_response=False)
-            self.subscription_ids.clear()
-        except Exception as e:
-            logging.error(f"Error cleaning up subscriptions: {e}")
-    
     async def disconnect(self):
         try:
             self.is_connected = False
-            await self.cleanup_subscriptions()
+            self.is_listening = False
+            
+            # Cancel all pending futures
+            for req_id, future in self.response_futures.items():
+                if not future.done():
+                    future.cancel()
+            self.response_futures.clear()
+            
             if self.websocket and not self.websocket.closed:
                 await self.websocket.close()
             logging.info("🔌 Disconnected from Deriv API")
@@ -380,11 +401,12 @@ class DerivTradingBot:
         self.config = config
         self.is_running = False
         self.deriv_api = DerivAPI(config['deriv_app_id'], config['deriv_api_token'])
-        self.risk_manager = RiskManager(config.get('max_daily_loss_percent', 50.0))
+        self.risk_manager = RiskManager(config.get('max_daily_loss_percent', 30.0))
         self.notification_manager = NotificationManager(config.get('telegram_config'))
         self.technical_analyzer = TechnicalAnalyzer(self.deriv_api)
         self.symbols = config.get('symbols', ['R_25'])
         self.trade_count = 0
+        self.last_trade_time = 0
         
         self.init_database()
         self.setup_logging()
@@ -443,6 +465,12 @@ class DerivTradingBot:
     
     async def place_contract(self, signal: Dict) -> bool:
         try:
+            # Rate limiting - don't trade too frequently
+            current_time = time.time()
+            if current_time - self.last_trade_time < 60:  # Wait at least 1 minute between trades
+                logging.info("⏰ Rate limiting - waiting between trades")
+                return False
+            
             current_balance = await self.deriv_api.get_balance()
             if not self.risk_manager.can_trade(current_balance):
                 logging.warning("⚠️ Cannot trade - risk limit or low balance")
@@ -451,7 +479,13 @@ class DerivTradingBot:
             stake_amount = self.risk_manager.calculate_position_size(current_balance)
             contract_type = signal['action'].upper()  # CALL or PUT
             
+            # Additional validation
+            if stake_amount < 0.35:
+                logging.warning("⚠️ Calculated stake too low")
+                return False
+            
             logging.info(f"🎯 PLACING TRADE: {contract_type} {signal['symbol']} ${stake_amount}")
+            logging.info(f"Current balance: ${current_balance}")
             
             response = await self.deriv_api.buy_contract(
                 symbol=signal['symbol'], 
@@ -461,6 +495,8 @@ class DerivTradingBot:
             
             if response.get('buy'):
                 self.trade_count += 1
+                self.last_trade_time = current_time
+                
                 trade_data = {
                     'symbol': signal['symbol'], 
                     'contract_type': contract_type,
@@ -477,6 +513,13 @@ class DerivTradingBot:
             else:
                 error_msg = response.get('error', {}).get('message', 'Unknown error')
                 logging.error(f"❌ TRADE FAILED: {error_msg}")
+                
+                # Handle specific errors
+                if 'price' in error_msg.lower():
+                    logging.error("Price validation failed - may need to wait for market conditions")
+                elif 'balance' in error_msg.lower():
+                    logging.error("Insufficient balance")
+                
                 return False
                 
         except Exception as e:
@@ -496,20 +539,23 @@ class DerivTradingBot:
                             conn = sqlite3.connect('deriv_trades.db')
                             cursor = conn.cursor()
                             cursor.execute('''UPDATE trades SET status = ?, sell_price = ?, profit_loss = ?
-                                             WHERE contract_id = ?''',
+                                             WHERE contract_id = ? AND status = 'open' ''',
                                           ('closed', contract.get('sell_price', 0), 
                                            profit_loss, str(contract['contract_id'])))
-                            conn.commit()
+                            
+                            if cursor.rowcount > 0:  # Only notify if we actually updated a record
+                                conn.commit()
+                                
+                                if profit_loss < 0:
+                                    self.risk_manager.update_daily_loss(abs(profit_loss))
+                                
+                                status = "✅ WIN" if profit_loss > 0 else "❌ LOSS"
+                                message = f"{status} ${profit_loss:.2f}\nContract: {contract['contract_id']}"
+                                self.notification_manager.notify("TRADE RESULT", message)
+                            
                             conn.close()
                         except Exception as db_e:
                             logging.error(f"DB update error: {db_e}")
-                        
-                        if profit_loss < 0:
-                            self.risk_manager.update_daily_loss(abs(profit_loss))
-                        
-                        status = "✅ WIN" if profit_loss > 0 else "❌ LOSS"
-                        message = f"{status} ${profit_loss:.2f}\nContract: {contract['contract_id']}"
-                        self.notification_manager.notify("TRADE RESULT", message)
                         
         except Exception as e:
             logging.error(f"❌ Position monitoring error: {e}")
@@ -522,6 +568,10 @@ class DerivTradingBot:
                 if signal['action'] != 'none':
                     signals.append(signal)
                     logging.info(f"🔍 SIGNAL: {signal['action'].upper()} {symbol} (confidence: {signal['confidence']}%)")
+                    
+                # Small delay between symbol processing
+                await asyncio.sleep(1)
+                
             except Exception as e:
                 logging.error(f"❌ Signal scan error for {symbol}: {e}")
         return signals
@@ -534,20 +584,25 @@ class DerivTradingBot:
                 logging.error("❌ Connection check failed")
                 return
             
+            # Monitor existing positions first
             await self.monitor_positions()
+            
+            # Get new signals
             signals = await self.scan_for_signals_async()
             
+            # Execute trades with higher confidence threshold
             for signal in signals:
-                if signal['confidence'] >= 70:  # Only high confidence signals
+                if signal['confidence'] >= 80:  # Higher threshold
                     success = await self.place_contract(signal)
                     if success:
-                        await asyncio.sleep(3)  # Delay between trades
+                        await asyncio.sleep(5)  # Delay between successful trades
+                        break  # Only one trade per cycle
                     else:
-                        await asyncio.sleep(10)  # Longer delay on failure
+                        await asyncio.sleep(15)  # Longer delay on failure
                         
         except Exception as e:
             logging.error(f"❌ Trading cycle error: {e}")
-            await asyncio.sleep(15)
+            await asyncio.sleep(30)
     
     async def start(self):
         logging.info("🚀 STARTING TRADING BOT...")
@@ -561,15 +616,18 @@ class DerivTradingBot:
         
         cycle_count = 0
         error_count = 0
-        max_errors = 3
+        max_errors = 5
         
         while self.is_running:
             try:
                 cycle_count += 1
                 logging.info(f"📈 CYCLE #{cycle_count}")
+                
                 await self.run_trading_cycle()
                 error_count = 0  # Reset on success
-                await asyncio.sleep(30)  # Wait 30 seconds between cycles
+                
+                # Longer wait between cycles to be more conservative
+                await asyncio.sleep(60)  # Wait 1 minute between cycles
                 
             except Exception as e:
                 error_count += 1
@@ -584,7 +642,7 @@ class DerivTradingBot:
                         logging.error("❌ Reconnection failed, stopping bot")
                         break
                 
-                await asyncio.sleep(60)  # Wait 1 minute on error
+                await asyncio.sleep(120)  # Wait 2 minutes on error
         
         await self.deriv_api.disconnect()
         return True
@@ -598,7 +656,7 @@ def create_config():
     return {
         'deriv_app_id': os.getenv('DERIV_APP_ID', '1089'),  # Default to 1089 if not set
         'deriv_api_token': os.getenv('DERIV_API_TOKEN', 'your_api_token_here'),
-        'max_daily_loss_percent': float(os.getenv('MAX_DAILY_LOSS', '30.0')),
+        'max_daily_loss_percent': float(os.getenv('MAX_DAILY_LOSS', '20.0')),  # More conservative
         'symbols': os.getenv('TRADING_SYMBOLS', 'R_25').split(','),
         'telegram_config': {
             'bot_token': os.getenv('TELEGRAM_BOT_TOKEN'),
