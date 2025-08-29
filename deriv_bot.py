@@ -128,6 +128,8 @@ class DerivAPI:
         self.req_id = 0
         self.current_prices = {}
         self.connection_lock = asyncio.Lock()
+        self.pending_requests = {}  # Track pending requests by req_id
+        self.subscription_ids = {}  # Track active subscriptions
         
     async def connect(self):
         try:
@@ -165,7 +167,7 @@ class DerivAPI:
             return await self.connect()
         return True
     
-    async def send_request(self, request: Dict) -> Dict:
+    async def send_request(self, request: Dict, expect_response: bool = True) -> Dict:
         async with self.connection_lock:
             if not await self.ensure_connected():
                 return {"error": {"message": "Connection failed"}}
@@ -174,21 +176,68 @@ class DerivAPI:
                 self.req_id += 1
                 request['req_id'] = self.req_id
                 
+                if expect_response:
+                    self.pending_requests[self.req_id] = {'request': request, 'response': None}
+                
                 await asyncio.wait_for(
                     self.websocket.send(json.dumps(request)), 
                     timeout=10
                 )
                 
-                response_str = await asyncio.wait_for(
-                    self.websocket.recv(), 
-                    timeout=15
-                )
+                if not expect_response:
+                    return {"success": True}
                 
-                response = json.loads(response_str)
-                return response
+                # Wait for the specific response
+                timeout_count = 0
+                max_timeout = 30  # 30 seconds total timeout
+                
+                while timeout_count < max_timeout:
+                    try:
+                        response_str = await asyncio.wait_for(
+                            self.websocket.recv(), 
+                            timeout=1
+                        )
+                        
+                        response = json.loads(response_str)
+                        response_req_id = response.get('req_id')
+                        
+                        # Handle tick subscriptions (these don't match our req_id)
+                        if response.get('msg_type') == 'tick' and 'subscription' in response:
+                            # Update current price from tick
+                            if 'tick' in response:
+                                symbol = response['tick'].get('symbol', '')
+                                price = response['tick'].get('quote', 0)
+                                if symbol and price:
+                                    self.current_prices[symbol] = float(price)
+                            continue
+                        
+                        # Check if this is the response we're waiting for
+                        if response_req_id == self.req_id:
+                            if self.req_id in self.pending_requests:
+                                del self.pending_requests[self.req_id]
+                            return response
+                        
+                        # Handle other responses (like balance updates, portfolio updates)
+                        if response_req_id and response_req_id in self.pending_requests:
+                            self.pending_requests[response_req_id]['response'] = response
+                        
+                    except asyncio.TimeoutError:
+                        timeout_count += 1
+                        continue
+                    except Exception as e:
+                        logging.error(f"Error receiving response: {e}")
+                        break
+                
+                # Cleanup pending request
+                if self.req_id in self.pending_requests:
+                    del self.pending_requests[self.req_id]
+                
+                return {"error": {"message": "Response timeout"}}
                 
             except Exception as e:
                 logging.error(f"❌ API request error: {e}")
+                if self.req_id in self.pending_requests:
+                    del self.pending_requests[self.req_id]
                 return {"error": {"message": str(e)}}
     
     async def authorize(self):
@@ -207,19 +256,29 @@ class DerivAPI:
     
     async def get_current_price(self, symbol: str) -> float:
         try:
+            # First, check if we already have a recent price
+            if symbol in self.current_prices:
+                return self.current_prices[symbol]
+            
+            # Subscribe to tick updates
             request = {"ticks": symbol, "subscribe": 1}
             response = await self.send_request(request)
             
             if response.get('tick'):
                 price = float(response['tick']['quote'])
                 self.current_prices[symbol] = price
+                
+                # Store subscription ID for cleanup later
+                if response.get('subscription'):
+                    self.subscription_ids[symbol] = response['subscription']['id']
+                
                 logging.info(f"💰 Current price for {symbol}: {price}")
                 return price
             
-            if symbol in self.current_prices:
-                return self.current_prices[symbol]
+            if response.get('error'):
+                logging.error(f"Error subscribing to {symbol}: {response['error']}")
             
-            return 0.0
+            return self.current_prices.get(symbol, 0.0)
             
         except Exception as e:
             logging.error(f"❌ Error getting price for {symbol}: {e}")
@@ -248,7 +307,7 @@ class DerivAPI:
     
     async def buy_contract(self, symbol: str, contract_type: str, amount: float) -> Dict:
         """
-        Fixed buy_contract with proper stake parameter
+        Fixed buy_contract with proper request handling
         """
         try:
             # Ensure we have current price
@@ -285,8 +344,8 @@ class DerivAPI:
                 logging.error(f"❌ Buy failed: {error_msg}")
                 return response
             else:
-                logging.error(f"❌ Unexpected response: {response}")
-                return {"error": {"message": "Unexpected response format"}}
+                logging.error(f"❌ Unexpected buy response: {response}")
+                return {"error": {"message": f"Unexpected response format: {response}"}}
                 
         except Exception as e:
             logging.error(f"❌ Contract purchase error: {e}")
@@ -296,9 +355,20 @@ class DerivAPI:
         response = await self.send_request({"portfolio": 1})
         return response.get('portfolio', {})
     
+    async def cleanup_subscriptions(self):
+        """Clean up active subscriptions"""
+        try:
+            for symbol, sub_id in self.subscription_ids.items():
+                forget_request = {"forget": sub_id}
+                await self.send_request(forget_request, expect_response=False)
+            self.subscription_ids.clear()
+        except Exception as e:
+            logging.error(f"Error cleaning up subscriptions: {e}")
+    
     async def disconnect(self):
         try:
             self.is_connected = False
+            await self.cleanup_subscriptions()
             if self.websocket and not self.websocket.closed:
                 await self.websocket.close()
             logging.info("🔌 Disconnected from Deriv API")
