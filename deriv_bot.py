@@ -224,13 +224,47 @@ class ContrariaTradingBot:
         return 'put' if self.trade_counter % 2 == 0 else 'call'
     
     def calculate_stake(self) -> float:
-        """CONTRARIAN: More aggressive position sizing than original"""
+        """CONTRARIAN: More aggressive position sizing than original - with proper rounding"""
         min_stake = 0.35
         max_stake = min(self.balance * 0.12, 2.0)
-        return max(min_stake, max_stake)
+        raw_stake = max(min_stake, max_stake)
+        
+        # Round to 2 decimal places to satisfy Deriv's validation
+        stake = round(raw_stake, 2)
+        
+        # Additional validation to ensure we don't go below minimum
+        if stake < 0.35:
+            stake = 0.35
+        
+        # Ensure we have sufficient balance
+        if stake > self.balance:
+            stake = round(self.balance * 0.8, 2)  # Use 80% of balance as safety margin
+        
+        logging.info(f"Calculated stake: raw={raw_stake:.6f}, final={stake:.2f}, balance=${self.balance:.2f}")
+        return stake
+    
+    def validate_stake(self, stake: float) -> bool:
+        """Validate stake meets Deriv requirements"""
+        # Check decimal places
+        stake_str = f"{stake:.2f}"  # Format to 2 decimal places
+        if len(stake_str.split('.')[-1]) > 2:
+            logging.error(f"Stake {stake} has more than 2 decimal places")
+            return False
+        
+        # Check minimum stake
+        if stake < 0.35:
+            logging.error(f"Stake {stake} is below minimum 0.35")
+            return False
+        
+        # Check against balance
+        if stake > self.balance:
+            logging.error(f"Stake {stake} exceeds balance {self.balance}")
+            return False
+        
+        return True
     
     async def place_trade(self, signal: str, symbol: str = 'R_25') -> bool:
-        """Enhanced trade placement with better error handling"""
+        """Enhanced trade placement with better error handling and stake validation"""
         current_time = time.time()
         
         if current_time - self.last_trade_time < 60:
@@ -242,6 +276,14 @@ class ContrariaTradingBot:
         
         stake = self.calculate_stake()
         
+        # Validate stake before using it
+        if not self.validate_stake(stake):
+            logging.error(f"Invalid stake calculated: {stake}")
+            return False
+        
+        # Ensure stake is properly rounded to 2 decimal places
+        stake = round(stake, 2)
+        
         try:
             # Get proposal
             proposal_req = {
@@ -250,10 +292,24 @@ class ContrariaTradingBot:
                 "duration": 1, "duration_unit": "m", "symbol": symbol
             }
             
+            logging.info(f"Sending proposal request with stake: {stake:.2f}")
             proposal_resp = await self.send_request(proposal_req)
+            
             if proposal_resp.get('error'):
-                logging.error(f"Proposal error: {proposal_resp['error']}")
-                return False
+                error_msg = proposal_resp['error'].get('message', 'Unknown error')
+                logging.error(f"Proposal error: {error_msg}")
+                
+                # If it's a stake validation error, try with minimum stake
+                if 'decimal places' in error_msg.lower():
+                    logging.info("Retrying with minimum stake due to decimal places error")
+                    stake = 0.35
+                    proposal_req["amount"] = stake
+                    proposal_resp = await self.send_request(proposal_req)
+                    if proposal_resp.get('error'):
+                        logging.error(f"Retry failed: {proposal_resp['error']}")
+                        return False
+                else:
+                    return False
             
             if not proposal_resp.get('proposal'):
                 logging.error("No proposal received")
@@ -290,7 +346,7 @@ class ContrariaTradingBot:
                         if db_attempt < 2:
                             await asyncio.sleep(1)
                 
-                self.notify(f"🚀 CONTRARIAN TRADE: {signal.upper()} {symbol} ${stake} - ID: {contract_id}")
+                self.notify(f"🚀 CONTRARIAN TRADE: {signal.upper()} {symbol} ${stake:.2f} - ID: {contract_id}")
                 return True
             
         except Exception as e:
