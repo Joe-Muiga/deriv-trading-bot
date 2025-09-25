@@ -137,7 +137,7 @@ class NewsEventDetector:
     
     def is_news_time(self, current_time: datetime =                 'risk_score': risk_score,
                 'volatility_forecast': volatility_forecast
-            }
+)
             
         except Exception as e:
             logging.error(f"ML predictions error: {e}")
