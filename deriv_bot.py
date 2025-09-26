@@ -138,7 +138,7 @@ class NewsEventDetector:
     def is_news_time(self, current_time: datetime = None) -> Tuple[bool, float]:
         """Check if current time is near major news release"""
         if current_time is None:
-           current_time = datetime.now()
+            current_time = datetime.now()
     
         current_str = current_time.strftime("%H:%M")
     
