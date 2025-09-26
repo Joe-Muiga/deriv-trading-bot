@@ -135,9 +135,26 @@ class NewsEventDetector:
         ]
         self.news_currencies = ["USD", "EUR", "GBP", "JPY", "AUD", "CAD"]
     
-    def is_news_time(self, current_time: datetime =                 'risk_score': risk_score,
-                'volatility_forecast': volatility_forecast
-)
+    def is_news_time(self, current_time: datetime = None) -> Tuple[bool, float]:
+    """Check if current time is near major news release"""
+    if current_time is None:
+        current_time = datetime.now()
+    
+    current_str = current_time.strftime("%H:%M")
+    
+    for news_time in self.high_impact_times:
+        news_dt = datetime.strptime(news_time, "%H:%M").time()
+        current_dt = current_time.time()
+        
+        # Check if within 30 minutes of news time
+        time_diff = abs((datetime.combine(datetime.today(), current_dt) - 
+                       datetime.combine(datetime.today(), news_dt)).total_seconds())
+        
+        if time_diff <= 1800:  # 30 minutes
+            impact_factor = max(0.1, 1.0 - (time_diff / 1800))
+            return True, impact_factor
+    
+    return False, 0.0
             
         except Exception as e:
             logging.error(f"ML predictions error: {e}")
