@@ -1638,7 +1638,7 @@ async def main():
         logging.error(f"Main execution error: {e}")
     finally:
         logging.info("Bot shutdown completed")
-if _name_ == "_main_"
+if _name_ == "_main_" :
     try:
         import uvloop
         uvloop.install()
