@@ -1640,12 +1640,14 @@ async def main():
         logging.info("Bot shutdown completed")
 
 if __name__ == "__main__":
-    # For Render deployment compatibility
-    import uvloop
     try:
+        import uvloop
         uvloop.install()
     except ImportError:
-        pass  # uvloop not available, use default event loop
+        pass
+    
+    asyncio.run(main())
+   
     
     # Run the bot
     asyncio.run(main()) balance
