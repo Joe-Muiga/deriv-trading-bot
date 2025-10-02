@@ -1620,24 +1620,24 @@ class AIEnhancedDerivBot:
         except Exception as e:
             logging.error(f"Cleanup error: {e}")
 
-# Entry point and runner
+
 async def main():
     """Main entry point"""
     try:
-        # Validate required environment variables
         if not os.getenv('DERIV_API_TOKEN'):
             logging.warning("DERIV_API_TOKEN not set, running in demo mode")
-        
-        # Create and start bot
+
         bot = AIEnhancedDerivBot()
         await bot.start_bot()
-        
+
     except KeyboardInterrupt:
         logging.info("Received keyboard interrupt, shutting down...")
     except Exception as e:
         logging.error(f"Main execution error: {e}")
     finally:
         logging.info("Bot shutdown completed")
+        
+
 if _name_ == "_main_":
     try:
         import uvloop
