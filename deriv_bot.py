@@ -1637,25 +1637,30 @@ async def main():
     finally:
         logging.info("Bot shutdown completed")
         
-async def main():
-    try:
-        if not os.getenv('DERIV_API_TOKEN'):
-            logging.warning("DERIV_API_TOKEN not set, running in demo mode")
-        bot = AIEnhancedDerivBot()
-        await bot.start_bot()
-    except KeyboardInterrupt:
-        logging.info("Keyboard interrupt")
-    except Exception as e:
-        logging.error(f"Error: {e}")
-    finally:
-        logging.info("Shutdown complete")
 
-if _name_ == "_main_":
+def run_bot():
+    """Run the bot with proper error handling"""
+    logging.info("Initializing bot...")
+    
     try:
         import uvloop
         uvloop.install()
-except ImportError:
-    pass
+    except:
+        pass  # Use default event loop if uvloop unavailable
+    
+    try:
+        if not os.getenv('DERIV_API_TOKEN'):
+            logging.warning("DERIV_API_TOKEN not set")
+        
+        bot = AIEnhancedDerivBot()
+        asyncio.run(bot.start_bot())
+    except KeyboardInterrupt:
+        logging.info("Shutdown requested")
+    except:
+        logging.exception("Fatal error")
+
+if __name__ == "__main__":
+    run_bot()
 
 asyncio.run(main())
    
