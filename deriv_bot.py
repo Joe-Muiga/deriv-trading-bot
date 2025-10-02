@@ -3439,4 +3439,31 @@ class MLTradingEngine:
                 'market_regime': market_regime,
                 'confidence': confidence,
                 'time_horizon': time_horizon,
-                '
+                          'risk_score': risk_score,
+                'volatility_forecast': volatility_forecast
+            }
+            
+        except Exception as e:
+            logging.error(f"ML predictions error: {e}")
+            return self._get_default_ml_prediction()
+    
+    def _calculate_ml_tp_levels(self, profit_potential: float, reversal_risk: float, regime: MarketRegime) -> List[float]:
+        try:
+            base_tp = max(0.01, profit_potential)
+            if regime == MarketRegime.TRENDING_BULL or regime == MarketRegime.TRENDING_BEAR:
+                multipliers = [0.4, 0.7, 1.2] if reversal_risk < 0.3 else [0.3, 0.6]
+            elif regime == MarketRegime.VOLATILE:
+                multipliers = [0.2, 0.4] if reversal_risk > 0.6 else [0.3, 0.6, 0.9]
+            else:
+                multipliers = [0.5, 0.8] if reversal_risk > 0.4 else [0.6, 1.0]
+            return [base_tp * mult for mult in multipliers]
+        except:
+            return [0.015, 0.025]
+    
+    def _determine_time_horizon(self, regime: MarketRegime, volatility: float) -> str:
+        if regime == MarketRegime.VOLATILE or volatility > 0.05:
+            return "short"
+        elif regime == MarketRegime.TRENDING_BULL or regime == MarketRegime.TRENDING_BEAR:
+            return "medium"
+        else:
+            return "short"
