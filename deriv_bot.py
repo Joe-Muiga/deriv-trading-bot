@@ -1698,8 +1698,7 @@ def check_news_impact(self, current_time=None) -> Tuple[bool, float]:
 asyncio.run(main())
 
 
-
-    def get_news_sentiment_impact(self, symbol: str) -> float:
+def get_news_sentiment_impact(self, symbol: str) -> float:
     """Get news sentiment impact for symbol (simplified)"""
     # Simplified news impact based on volatility patterns
     current_hour = datetime.now().hour
@@ -1711,6 +1710,8 @@ asyncio.run(main())
         return 0.4
     else:
         return 0.2
+
+
 
 
 class TechnicalAnalysisEngine:
