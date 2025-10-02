@@ -1665,36 +1665,36 @@ if __name__ == "__main__":
 asyncio.run(main())
 
 async def get_balance(self):
-        """Get account balance"""
-        balance_response = await self._send_request({"balance": 1})
-        if balance_response and not balance_response.get('error'):
-            self.balance = float(balance_response['balance']['balance'])
-            self.risk_engine.current_balance = self.balance
-            logging.info(f"Account balance: {self.balance}")
+    """Get account balance"""
+    balance_response = await self._send_request({"balance": 1})
+    if balance_response and not balance_response.get('error'):
+        self.balance = float(balance_response['balance']['balance'])
+        self.risk_engine.current_balance = self.balance
+        logging.info(f"Account balance: {self.balance}")
+
+def check_news_impact(self, current_time=None) -> Tuple[bool, float]:
+    """Check if current time is near major news release"""
+    if current_time is None:
+        current_time = datetime.now()
     
-    def check_news_impact(self, current_time=None) -> Tuple[bool, float]:
-        """Check if current time is near major news release"""
-        if current_time is None:
-            current_time = datetime.now()
+    current_str = current_time.strftime("%H:%M")
+    
+    for news_time in self.high_impact_times:
+        news_dt = datetime.strptime(news_time, "%H:%M").time()
+        current_dt = current_time.time()
         
-        current_str = current_time.strftime("%H:%M")
+        # Check if within 30 minutes of news time
+        time_diff = abs((datetime.combine(datetime.today(), current_dt) - 
+                       datetime.combine(datetime.today(), news_dt)).total_seconds())
         
-        for news_time in self.high_impact_times:
-            news_dt = datetime.strptime(news_time, "%H:%M").time()
-            current_dt = current_time.time()
-            
-            # Check if within 30 minutes of news time
-            time_diff = abs((datetime.combine(datetime.today(), current_dt) - 
-                           datetime.combine(datetime.today(), news_dt)).total_seconds())
-            
-            if time_diff <= 1800:  # 30 minutes
-                impact_factor = max(0.1, 1.0 - (time_diff / 1800))
-                return True, impact_factor
-        
-        return False, 0.0
+        if time_diff <= 1800:  # 30 minutes
+            impact_factor = max(0.1, 1.0 - (time_diff / 1800))
+            return True, impact_factor
+    
+    return False, 0.0
 
 
-# Run the bot (only once at the end of your file)
+# Run the bot - remove the word "balance" after this line
 asyncio.run(main())
     
     
