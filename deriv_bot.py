@@ -1696,20 +1696,22 @@ def check_news_impact(self, current_time=None) -> Tuple[bool, float]:
 
 # Run the bot - remove the word "balance" after this line
 asyncio.run(main())
-    
-    
+
+
+
     def get_news_sentiment_impact(self, symbol: str) -> float:
-        """Get news sentiment impact for symbol (simplified)"""
-        # Simplified news impact based on volatility patterns
-        current_hour = datetime.now().hour
-        
-        # Higher impact during market open hours
-        if 8 <= current_hour <= 16:  # London/NY overlap
-            return 0.7
-        elif 0 <= current_hour <= 2:  # Asia session
-            return 0.4
-        else:
-            return 0.2
+    """Get news sentiment impact for symbol (simplified)"""
+    # Simplified news impact based on volatility patterns
+    current_hour = datetime.now().hour
+    
+    # Higher impact during market open hours
+    if 8 <= current_hour <= 16:  # London/NY overlap
+        return 0.7
+    elif 0 <= current_hour <= 2:  # Asia session
+        return 0.4
+    else:
+        return 0.2
+
 
 class TechnicalAnalysisEngine:
     """Advanced technical analysis with professional-grade calculations"""
