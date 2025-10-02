@@ -1637,6 +1637,18 @@ async def main():
     finally:
         logging.info("Bot shutdown completed")
         
+async def main():
+    try:
+        if not os.getenv('DERIV_API_TOKEN'):
+            logging.warning("DERIV_API_TOKEN not set, running in demo mode")
+        bot = AIEnhancedDerivBot()
+        await bot.start_bot()
+    except KeyboardInterrupt:
+        logging.info("Keyboard interrupt")
+    except Exception as e:
+        logging.error(f"Error: {e}")
+    finally:
+        logging.info("Shutdown complete")
 
 if _name_ == "_main_":
     try:
