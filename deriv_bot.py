@@ -511,6 +511,101 @@ class RiskManagementEngine:
             logging.error(f"Risk metrics calculation error: {e}")
             return {'error': str(e)}
 
+
+
+
+class MLTradingEngine:
+    """Machine Learning trading engine with simplified models"""
+    
+    def __init__(self):
+        self.prediction_cache = {}
+        self.cache_timeout = 60  # 1 minute cache
+        self.model_ready = False
+        
+    def predict_market_direction(self, df: pd.DataFrame) -> Dict:
+        """Predict market direction using simple heuristics (placeholder for ML)"""
+        try:
+            if len(df) < 20:
+                return {'direction': 'neutral', 'confidence': 0.0, 'signal_strength': 0.0}
+            
+            # Simple trend-based prediction (placeholder for actual ML)
+            close = df['close']
+            sma_20 = close.rolling(window=20).mean()
+            current_price = close.iloc[-1]
+            sma_value = sma_20.iloc[-1]
+            
+            # Calculate price momentum
+            price_change = (current_price - close.iloc[-20]) / close.iloc[-20]
+            
+            # Determine direction and confidence
+            if current_price > sma_value and price_change > 0.01:
+                direction = 'bullish'
+                confidence = min(abs(price_change) * 10, 1.0)
+            elif current_price < sma_value and price_change < -0.01:
+                direction = 'bearish'
+                confidence = min(abs(price_change) * 10, 1.0)
+            else:
+                direction = 'neutral'
+                confidence = 0.5
+            
+            signal_strength = confidence * 0.8  # Scale down for conservative trading
+            
+            return {
+                'direction': direction,
+                'confidence': float(confidence),
+                'signal_strength': float(signal_strength),
+                'price_momentum': float(price_change)
+            }
+            
+        except Exception as e:
+            logging.error(f"ML prediction error: {e}")
+            return {'direction': 'neutral', 'confidence': 0.0, 'signal_strength': 0.0}
+    
+    def generate_trade_signals(self, df: pd.DataFrame, indicators: Dict) -> Dict:
+        """Generate ML-enhanced trade signals"""
+        try:
+            prediction = self.predict_market_direction(df)
+            
+            # Combine ML prediction with technical indicators
+            ta_score = 0
+            if 'rsi' in indicators:
+                rsi = indicators['rsi']
+                if rsi < 30:
+                    ta_score += 0.3
+                elif rsi > 70:
+                    ta_score -= 0.3
+            
+            if 'macd' in indicators and 'macd_signal' in indicators:
+                macd_diff = indicators['macd'] - indicators['macd_signal']
+                ta_score += 0.2 if macd_diff > 0 else -0.2
+            
+            # Final signal
+            ml_weight = 0.6
+            ta_weight = 0.4
+            combined_score = (prediction['signal_strength'] * ml_weight + 
+                            abs(ta_score) * ta_weight)
+            
+            if prediction['direction'] == 'bullish' and ta_score >= 0:
+                signal = 'buy'
+            elif prediction['direction'] == 'bearish' and ta_score <= 0:
+                signal = 'sell'
+            else:
+                signal = 'hold'
+            
+            return {
+                'signal': signal,
+                'strength': float(combined_score),
+                'ml_direction': prediction['direction'],
+                'ml_confidence': prediction['confidence'],
+                'ta_contribution': float(ta_score)
+            }
+            
+        except Exception as e:
+            logging.error(f"Signal generation error: {e}")
+            return {'signal': 'hold', 'strength': 0.0}
+
+
+
 class AIEnhancedDerivBot:
     """Complete AI/ML Enhanced Deriv Trading Bot"""
     
