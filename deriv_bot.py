@@ -3,7 +3,7 @@
 AI/ML Enhanced Deriv Trading Bot - Complete Linux Optimized Version
 Designed for Render deployment with comprehensive ML capabilities
 """
-from your_module_name import TechnicalAnalysisEngine
+
 import asyncio
 import websockets
 import json
