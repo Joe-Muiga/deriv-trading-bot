@@ -604,6 +604,582 @@ class MLTradingEngine:
             logging.error(f"Signal generation error: {e}")
             return {'signal': 'hold', 'strength': 0.0}
 
+class TechnicalAnalysisEngine:
+    """Advanced technical analysis with professional-grade calculations"""
+    
+    def __init__(self):
+        self.indicators_cache = {}
+        self.cache_timeout = 60  # 1 minute cache
+        
+    def calculate_all_indicators(self, df: pd.DataFrame) -> Dict:
+        """Calculate comprehensive technical indicators"""
+        try:
+            if len(df) < 20:
+                return self._get_default_indicators()
+            
+            indicators = {}
+            
+            # Moving Averages
+            indicators.update(self._calculate_moving_averages(df))
+            
+            # Momentum Indicators
+            indicators.update(self._calculate_momentum_indicators(df))
+            
+            # Volatility Indicators
+            indicators.update(self._calculate_volatility_indicators(df))
+            
+            # Trend Indicators
+            indicators.update(self._calculate_trend_indicators(df))
+            
+            # Volume Indicators (if available)
+            indicators.update(self._calculate_volume_indicators(df))
+            
+            # Support/Resistance Levels
+            indicators.update(self._calculate_support_resistance(df))
+            
+            # Pattern Recognition
+            indicators.update(self._detect_patterns(df))
+            
+            return indicators
+            
+        except Exception as e:
+            logging.error(f"Technical analysis calculation error: {e}")
+            return self._get_default_indicators()
+    
+    def _calculate_moving_averages(self, df: pd.DataFrame) -> Dict:
+        """Calculate various moving averages"""
+        try:
+            close = df['close']
+            
+            # Simple Moving Averages
+            sma_5 = close.rolling(window=5).mean()
+            sma_10 = close.rolling(window=10).mean()
+            sma_20 = close.rolling(window=20).mean()
+            sma_50 = close.rolling(window=50).mean() if len(df) >= 50 else sma_20
+            
+            # Exponential Moving Averages
+            ema_12 = close.ewm(span=12).mean()
+            ema_26 = close.ewm(span=26).mean()
+            ema_50 = close.ewm(span=50).mean() if len(df) >= 50 else ema_26
+            
+            # Volume Weighted MA (if volume available)
+            if 'volume' in df.columns and not df['volume'].isna().all():
+                vwma = (close * df['volume']).rolling(20).sum() / df['volume'].rolling(20).sum()
+            else:
+                vwma = sma_20
+            
+            return {
+                'sma_5': float(sma_5.iloc[-1]) if not sma_5.isna().iloc[-1] else float(close.iloc[-1]),
+                'sma_10': float(sma_10.iloc[-1]) if not sma_10.isna().iloc[-1] else float(close.iloc[-1]),
+                'sma_20': float(sma_20.iloc[-1]) if not sma_20.isna().iloc[-1] else float(close.iloc[-1]),
+                'sma_50': float(sma_50.iloc[-1]) if not sma_50.isna().iloc[-1] else float(close.iloc[-1]),
+                'ema_12': float(ema_12.iloc[-1]) if not ema_12.isna().iloc[-1] else float(close.iloc[-1]),
+                'ema_26': float(ema_26.iloc[-1]) if not ema_26.isna().iloc[-1] else float(close.iloc[-1]),
+                'ema_50': float(ema_50.iloc[-1]) if not ema_50.isna().iloc[-1] else float(close.iloc[-1]),
+                'vwma_20': float(vwma.iloc[-1]) if not vwma.isna().iloc[-1] else float(close.iloc[-1])
+            }
+        except:
+            close_price = float(df['close'].iloc[-1])
+            return {
+                'sma_5': close_price, 'sma_10': close_price, 'sma_20': close_price, 'sma_50': close_price,
+                'ema_12': close_price, 'ema_26': close_price, 'ema_50': close_price, 'vwma_20': close_price
+            }
+    
+    def _calculate_momentum_indicators(self, df: pd.DataFrame) -> Dict:
+        """Calculate momentum indicators"""
+        try:
+            close = df['close']
+            high = df['high']
+            low = df['low']
+            
+            # RSI
+            delta = close.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
+            
+            # Stochastic
+            low_14 = low.rolling(window=14).min()
+            high_14 = high.rolling(window=14).max()
+            k_percent = 100 * (close - low_14) / (high_14 - low_14)
+            d_percent = k_percent.rolling(window=3).mean()
+            
+            # MACD
+            ema_12 = close.ewm(span=12).mean()
+            ema_26 = close.ewm(span=26).mean()
+            macd_line = ema_12 - ema_26
+            macd_signal = macd_line.ewm(span=9).mean()
+            macd_histogram = macd_line - macd_signal
+            
+            # CCI
+            typical_price = (high + low + close) / 3
+            sma_tp = typical_price.rolling(window=20).mean()
+            mean_deviation = typical_price.rolling(window=20).apply(lambda x: np.mean(np.abs(x - x.mean())))
+            cci = (typical_price - sma_tp) / (0.015 * mean_deviation)
+            
+            # Williams %R
+            williams_r = -100 * (high_14 - close) / (high_14 - low_14)
+            
+            return {
+                'rsi': float(rsi.iloc[-1]) if not rsi.isna().iloc[-1] else 50.0,
+                'stoch_k': float(k_percent.iloc[-1]) if not k_percent.isna().iloc[-1] else 50.0,
+                'stoch_d': float(d_percent.iloc[-1]) if not d_percent.isna().iloc[-1] else 50.0,
+                'macd': float(macd_line.iloc[-1]) if not macd_line.isna().iloc[-1] else 0.0,
+                'macd_signal': float(macd_signal.iloc[-1]) if not macd_signal.isna().iloc[-1] else 0.0,
+                'macd_histogram': float(macd_histogram.iloc[-1]) if not macd_histogram.isna().iloc[-1] else 0.0,
+                'cci': float(cci.iloc[-1]) if not cci.isna().iloc[-1] else 0.0,
+                'williams_r': float(williams_r.iloc[-1]) if not williams_r.isna().iloc[-1] else -50.0
+            }
+        except:
+            return {
+                'rsi': 50.0, 'stoch_k': 50.0, 'stoch_d': 50.0, 'macd': 0.0,
+                'macd_signal': 0.0, 'macd_histogram': 0.0, 'cci': 0.0, 'williams_r': -50.0
+            }
+    
+    def _calculate_volatility_indicators(self, df: pd.DataFrame) -> Dict:
+        """Calculate volatility indicators"""
+        try:
+            close = df['close']
+            high = df['high']
+            low = df['low']
+            
+            # Bollinger Bands
+            sma_20 = close.rolling(window=20).mean()
+            std_20 = close.rolling(window=20).std()
+            bb_upper = sma_20 + (std_20 * 2)
+            bb_lower = sma_20 - (std_20 * 2)
+            bb_position = (close - bb_lower) / (bb_upper - bb_lower)
+            
+            # ATR (Average True Range)
+            tr1 = high - low
+            tr2 = abs(high - close.shift(1))
+            tr3 = abs(low - close.shift(1))
+            true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            atr = true_range.rolling(window=14).mean()
+            
+            # Historical Volatility
+            returns = close.pct_change()
+            historical_vol = returns.rolling(window=20).std() * np.sqrt(252)  # Annualized
+            
+            # Keltner Channels
+            kc_middle = close.ewm(span=20).mean()
+            kc_upper = kc_middle + (atr * 2)
+            kc_lower = kc_middle - (atr * 2)
+            
+            return {
+                'bb_upper': float(bb_upper.iloc[-1]) if not bb_upper.isna().iloc[-1] else float(close.iloc[-1] * 1.02),
+                'bb_middle': float(sma_20.iloc[-1]) if not sma_20.isna().iloc[-1] else float(close.iloc[-1]),
+                'bb_lower': float(bb_lower.iloc[-1]) if not bb_lower.isna().iloc[-1] else float(close.iloc[-1] * 0.98),
+                'bb_position': float(bb_position.iloc[-1]) if not bb_position.isna().iloc[-1] else 0.5,
+                'atr': float(atr.iloc[-1]) if not atr.isna().iloc[-1] else float(close.iloc[-1] * 0.01),
+                'historical_vol': float(historical_vol.iloc[-1]) if not historical_vol.isna().iloc[-1] else 0.2,
+                'kc_upper': float(kc_upper.iloc[-1]) if not kc_upper.isna().iloc[-1] else float(close.iloc[-1] * 1.015),
+                'kc_lower': float(kc_lower.iloc[-1]) if not kc_lower.isna().iloc[-1] else float(close.iloc[-1] * 0.985)
+            }
+        except:
+            close_price = float(df['close'].iloc[-1])
+            return {
+                'bb_upper': close_price * 1.02, 'bb_middle': close_price, 'bb_lower': close_price * 0.98,
+                'bb_position': 0.5, 'atr': close_price * 0.01, 'historical_vol': 0.2,
+                'kc_upper': close_price * 1.015, 'kc_lower': close_price * 0.985
+            }
+    
+    def _calculate_trend_indicators(self, df: pd.DataFrame) -> Dict:
+        """Calculate trend indicators"""
+        try:
+            close = df['close']
+            high = df['high']
+            low = df['low']
+            
+            # ADX (Average Directional Index)
+            plus_dm = high.diff()
+            minus_dm = low.diff()
+            plus_dm[plus_dm < 0] = 0
+            minus_dm[minus_dm > 0] = 0
+            minus_dm = abs(minus_dm)
+            
+            tr = pd.concat([high - low, abs(high - close.shift(1)), abs(low - close.shift(1))], axis=1).max(axis=1)
+            atr = tr.rolling(window=14).mean()
+            
+            plus_di = 100 * (plus_dm.rolling(window=14).mean() / atr)
+            minus_di = 100 * (minus_dm.rolling(window=14).mean() / atr)
+            dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+            adx = dx.rolling(window=14).mean()
+            
+            # Parabolic SAR (simplified)
+            psar = close.copy()  # Simplified version
+            
+            # Ichimoku components (simplified)
+            high_9 = high.rolling(window=9).max()
+            low_9 = low.rolling(window=9).min()
+            tenkan_sen = (high_9 + low_9) / 2
+            
+            high_26 = high.rolling(window=26).max()
+            low_26 = low.rolling(window=26).min()
+            kijun_sen = (high_26 + low_26) / 2
+            
+            return {
+                'adx': float(adx.iloc[-1]) if not adx.isna().iloc[-1] else 25.0,
+                'plus_di': float(plus_di.iloc[-1]) if not plus_di.isna().iloc[-1] else 25.0,
+                'minus_di': float(minus_di.iloc[-1]) if not minus_di.isna().iloc[-1] else 25.0,
+                'psar': float(psar.iloc[-1]) if not psar.isna().iloc[-1] else float(close.iloc[-1]),
+                'tenkan_sen': float(tenkan_sen.iloc[-1]) if not tenkan_sen.isna().iloc[-1] else float(close.iloc[-1]),
+                'kijun_sen': float(kijun_sen.iloc[-1]) if not kijun_sen.isna().iloc[-1] else float(close.iloc[-1]),
+                'trend_strength': self._calculate_trend_strength(df)
+            }
+        except:
+            close_price = float(df['close'].iloc[-1])
+            return {
+                'adx': 25.0, 'plus_di': 25.0, 'minus_di': 25.0, 'psar': close_price,
+                'tenkan_sen': close_price, 'kijun_sen': close_price, 'trend_strength': 0.5
+            }
+    
+    def _calculate_volume_indicators(self, df: pd.DataFrame) -> Dict:
+        """Calculate volume indicators"""
+        try:
+            close = df['close']
+            
+            if 'volume' in df.columns and not df['volume'].isna().all():
+                volume = df['volume']
+                
+                # On Balance Volume
+                obv = (volume * ((close > close.shift(1)).astype(int) - (close < close.shift(1)).astype(int))).cumsum()
+                
+                # Volume SMA
+                volume_sma = volume.rolling(window=20).mean()
+                
+                # Volume Rate of Change
+                volume_roc = volume.pct_change(periods=10)
+                
+                return {
+                    'obv': float(obv.iloc[-1]) if not obv.isna().iloc[-1] else 0.0,
+                    'volume_sma': float(volume_sma.iloc[-1]) if not volume_sma.isna().iloc[-1] else 1000.0,
+                    'volume_roc': float(volume_roc.iloc[-1]) if not volume_roc.isna().iloc[-1] else 0.0,
+                    'volume_ratio': float(volume.iloc[-1] / volume_sma.iloc[-1]) if not volume_sma.isna().iloc[-1] and volume_sma.iloc[-1] > 0 else 1.0
+                }
+            else:
+                return {
+                    'obv': 0.0,
+                    'volume_sma': 1000.0,
+                    'volume_roc': 0.0,
+                    'volume_ratio': 1.0
+                }
+        except:
+            return {
+                'obv': 0.0,
+                'volume_sma': 1000.0,
+                'volume_roc': 0.0,
+                'volume_ratio': 1.0
+            }
+    
+    def _calculate_support_resistance(self, df: pd.DataFrame) -> Dict:
+        """Calculate support and resistance levels"""
+        try:
+            high = df['high'].values
+            low = df['low'].values
+            close = df['close'].values
+            
+            # Find pivot points (simplified)
+            window = min(10, len(high) // 4)
+            
+            # Resistance levels (local maxima)
+            resistance_indices, _ = find_peaks(high, distance=window)
+            resistance_levels = high[resistance_indices] if len(resistance_indices) > 0 else [max(high)]
+            
+            # Support levels (local minima)
+            support_indices, _ = find_peaks(-low, distance=window)
+            support_levels = low[support_indices] if len(support_indices) > 0 else [min(low)]
+            
+            current_price = close[-1]
+            
+            # Find nearest levels
+            resistance_levels = [r for r in resistance_levels if r > current_price]
+            support_levels = [s for s in support_levels if s < current_price]
+            
+            nearest_resistance = min(resistance_levels) if resistance_levels else current_price * 1.02
+            nearest_support = max(support_levels) if support_levels else current_price * 0.98
+            
+            return {
+                'nearest_resistance': float(nearest_resistance),
+                'nearest_support': float(nearest_support),
+                'resistance_strength': len([r for r in resistance_levels if abs(r - nearest_resistance) / current_price < 0.005]),
+                'support_strength': len([s for s in support_levels if abs(s - nearest_support) / current_price < 0.005])
+            }
+        except:
+            current_price = float(df['close'].iloc[-1])
+            return {
+                'nearest_resistance': current_price * 1.02,
+                'nearest_support': current_price * 0.98,
+                'resistance_strength': 1,
+                'support_strength': 1
+            }
+    
+    def _detect_patterns(self, df: pd.DataFrame) -> Dict:
+        """Detect candlestick patterns"""
+        try:
+            if len(df) < 3:
+                return {'doji': 0.0, 'hammer': 0.0, 'engulfing_bull': 0.0, 'engulfing_bear': 0.0}
+            
+            latest = df.iloc[-1]
+            prev = df.iloc[-2]
+            
+            open_price = latest['open']
+            high_price = latest['high']
+            low_price = latest['low']
+            close_price = latest['close']
+            
+            body_size = abs(close_price - open_price)
+            total_range = high_price - low_price
+            upper_shadow = high_price - max(open_price, close_price)
+            lower_shadow = min(open_price, close_price) - low_price
+            
+            # Doji pattern
+            doji_score = 1.0 - (body_size / total_range) if total_range > 0 else 0.0
+            
+            # Hammer pattern
+            hammer_score = 0.0
+            if total_range > 0:
+                hammer_score = (lower_shadow / total_range) * (1 - body_size / total_range)
+                if lower_shadow > body_size * 2 and upper_shadow < body_size:
+                    hammer_score *= 2
+            
+            # Engulfing patterns
+            engulfing_bull = 0.0
+            engulfing_bear = 0.0
+            
+            if close_price > open_price and prev['close'] < prev['open']:  # Current green, prev red
+                if open_price < prev['close'] and close_price > prev['open']:
+                    engulfing_bull = 1.0
+            
+            if close_price < open_price and prev['close'] > prev['open']:  # Current red, prev green
+                if open_price > prev['close'] and close_price < prev['open']:
+                    engulfing_bear = 1.0
+            
+            return {
+                'doji': min(1.0, max(0.0, doji_score)),
+                'hammer': min(1.0, max(0.0, hammer_score)),
+                'engulfing_bull': engulfing_bull,
+                'engulfing_bear': engulfing_bear
+            }
+        except:
+            return {'doji': 0.0, 'hammer': 0.0, 'engulfing_bull': 0.0, 'engulfing_bear': 0.0}
+    
+    def _calculate_trend_strength(self, df: pd.DataFrame) -> float:
+        """Calculate overall trend strength"""
+        try:
+            close = df['close']
+            
+            # Multiple timeframe trend alignment
+            sma_5 = close.rolling(5).mean().iloc[-1]
+            sma_10 = close.rolling(10).mean().iloc[-1]
+            sma_20 = close.rolling(20).mean().iloc[-1]
+            current_price = close.iloc[-1]
+            
+            # Check trend alignment
+            uptrend_alignment = sma_5 > sma_10 > sma_20 and current_price > sma_5
+            downtrend_alignment = sma_5 < sma_10 < sma_20 and current_price < sma_5
+            
+            if uptrend_alignment:
+                return 1.0
+            elif downtrend_alignment:
+                return 0.0
+            else:
+                return 0.5
+        except:
+            return 0.5
+    
+    def _get_default_indicators(self) -> Dict:
+        """Return default indicators if calculation fails"""
+        return {
+            'sma_5': 100.0, 'sma_10': 100.0, 'sma_20': 100.0, 'sma_50': 100.0,
+            'ema_12': 100.0, 'ema_26': 100.0, 'ema_50': 100.0, 'vwma_20': 100.0,
+            'rsi': 50.0, 'stoch_k': 50.0, 'stoch_d': 50.0, 'macd': 0.0,
+            'macd_signal': 0.0, 'macd_histogram': 0.0, 'cci': 0.0, 'williams_r': -50.0,
+            'bb_upper': 102.0, 'bb_middle': 100.0, 'bb_lower': 98.0, 'bb_position': 0.5,
+            'atr': 1.0, 'historical_vol': 0.2, 'kc_upper': 101.5, 'kc_lower': 98.5,
+            'adx': 25.0, 'plus_di': 25.0, 'minus_di': 25.0, 'psar': 100.0,
+            'tenkan_sen': 100.0, 'kijun_sen': 100.0, 'trend_strength': 0.5,
+            'obv': 0.0, 'volume_sma': 1000.0, 'volume_roc': 0.0, 'volume_ratio': 1.0,
+            'nearest_resistance': 102.0, 'nearest_support': 98.0,
+            'resistance_strength': 1, 'support_strength': 1,
+            'doji': 0.0, 'hammer': 0.0, 'engulfing_bull': 0.0, 'engulfing_bear': 0.0
+        }
+
+class MarketDataProvider:
+    """Enhanced market data provider with multiple sources"""
+    
+    def __init__(self):
+        self.symbols_map = {
+            'R_50': '^GSPC',  # S&P 500 as proxy
+            'R_75': '^GSPC',
+            'R_100': '^GSPC',
+            'BOOM500': 'BTC-USD',  # Bitcoin as volatile asset proxy
+            'CRASH500': 'BTC-USD',
+            'BOOM1000': 'BTC-USD',
+            'CRASH1000': 'BTC-USD',
+            'Step_200': 'ETH-USD',
+            'Step_500': 'ETH-USD'
+        }
+        self.cache = {}
+        self.cache_timeout = 300  # 5 minutes
+        self.synthetic_data_cache = {}
+        
+    def get_market_data(self, symbol: str, period: str = '1mo', interval: str = '1h') -> pd.DataFrame:
+        """Fetch market data with fallback to synthetic data"""
+        cache_key = f"{symbol}_{period}_{interval}"
+        
+        # Check cache first
+        if cache_key in self.cache:
+            cached_data, timestamp = self.cache[cache_key]
+            if time.time() - timestamp < self.cache_timeout:
+                return cached_data
+        
+        # Try to get real data first
+        if YFINANCE_AVAILABLE:
+            data = self._get_real_market_data(symbol, period, interval)
+            if data is not None and len(data) > 20:
+                self.cache[cache_key] = (data, time.time())
+                return data
+        
+        # Fallback to synthetic data
+        logging.info(f"Using synthetic data for {symbol}")
+        data = self._generate_synthetic_data(symbol, period, interval)
+        
+        if data is not None:
+            self.cache[cache_key] = (data, time.time())
+            return data
+        
+        # Last resort - return minimal dummy data
+        return self._get_minimal_dummy_data()
+    
+    def _get_real_market_data(self, symbol: str, period: str, interval: str) -> Optional[pd.DataFrame]:
+        """Fetch real market data from Yahoo Finance"""
+        try:
+            proxy_symbol = self.symbols_map.get(symbol, '^GSPC')
+            ticker = yf.Ticker(proxy_symbol)
+            data = ticker.history(period=period, interval=interval)
+            
+            if data.empty:
+                logging.warning(f"No data received for {proxy_symbol}")
+                return None
+            
+            # Standardize column names
+            data.columns = [col.lower() for col in data.columns]
+            data.reset_index(inplace=True)
+            
+            # Add synthetic volume if missing
+            if 'volume' not in data.columns or data['volume'].isna().all():
+                data['volume'] = np.random.randint(1000, 10000, len(data))
+            
+            logging.info(f"Fetched {len(data)} rows for {symbol} (proxy: {proxy_symbol})")
+            return data
+            
+        except Exception as e:
+            logging.error(f"Error fetching real market data for {symbol}: {e}")
+            return None
+    
+    def _generate_synthetic_data(self, symbol: str, period: str, interval: str) -> pd.DataFrame:
+        """Generate realistic synthetic market data"""
+        try:
+            # Determine number of periods
+            period_map = {'1d': 24, '5d': 120, '1mo': 720, '3mo': 2160, '6mo': 4320, '1y': 8760}
+            interval_map = {'1m': 1, '5m': 5, '15m': 15, '1h': 60, '1d': 1440}
+            
+            total_minutes = period_map.get(period, 720) * 60
+            interval_minutes = interval_map.get(interval, 60)
+            num_points = min(1000, max(50, total_minutes // interval_minutes))
+            
+            # Generate timestamps
+            end_time = datetime.now()
+            start_time = end_time - timedelta(minutes=total_minutes)
+            timestamps = pd.date_range(start=start_time, end=end_time, periods=num_points)
+            
+            # Generate price data with realistic characteristics
+            np.random.seed(hash(symbol) % 2147483647)  # Consistent seed per symbol
+            
+            # Base parameters
+            initial_price = 100.0
+            volatility = 0.02 if 'R_' in symbol else 0.05  # Lower vol for synthetics
+            drift = 0.0001  # Slight upward drift
+            
+            # Generate returns
+            returns = np.random.normal(drift, volatility, num_points)
+            
+            # Add autocorrelation for realism
+            for i in range(1, len(returns)):
+                returns[i] += returns[i-1] * 0.1  # Small momentum effect
+            
+            # Generate prices
+            prices = [initial_price]
+            for ret in returns[1:]:
+                prices.append(prices[-1] * (1 + ret))
+            
+            # Generate OHLC data
+            opens = prices[:-1]  # Open is previous close
+            closes = prices[1:]  # Close is current price
+            
+            # Generate highs and lows
+            highs = []
+            lows = []
+            volumes = []
+            
+            for i in range(len(opens)):
+                open_price = opens[i]
+                close_price = closes[i]
+                
+                # High/low based on volatility
+                daily_range = abs(close_price - open_price) * np.random.uniform(1.5, 3.0)
+                high = max(open_price, close_price) + daily_range * np.random.uniform(0, 0.5)
+                low = min(open_price, close_price) - daily_range * np.random.uniform(0, 0.5)
+                
+                highs.append(high)
+                lows.append(max(0, low))  # Prevent negative prices
+                
+                # Volume correlated with price movement
+                price_change = abs(close_price - open_price) / open_price
+                base_volume = 5000
+                volume = int(base_volume * (1 + price_change * 10) * np.random.uniform(0.5, 2.0))
+                volumes.append(volume)
+            
+            # Create DataFrame
+            df = pd.DataFrame({
+                'datetime': timestamps[1:],
+                'open': opens,
+                'high': highs,
+                'low': lows,
+                'close': closes,
+                'volume': volumes
+            })
+            
+            return df
+            
+        except Exception as e:
+            logging.error(f"Error generating synthetic data for {symbol}: {e}")
+            return self._get_minimal_dummy_data()
+    
+    def _get_minimal_dummy_data(self) -> pd.DataFrame:
+        """Generate minimal dummy data as last resort"""
+        dates = pd.date_range(start=datetime.now() - timedelta(hours=24), periods=50, freq='30min')
+        base_price = 100.0
+        
+        data = []
+        for i, date in enumerate(dates):
+            price = base_price + np.sin(i * 0.1) * 2 + np.random.normal(0, 0.5)
+            data.append({
+                'datetime': date,
+                'open': price,
+                'high': price + np.random.uniform(0.1, 0.5),
+                'low': price - np.random.uniform(0.1, 0.5),
+                'close': price + np.random.normal(0, 0.2),
+                'volume': np.random.randint(1000, 5000)
+            })
+        
+        return pd.DataFrame(data)
+
+
+
+
 
 
 class AIEnhancedDerivBot:
@@ -1809,578 +2385,6 @@ def get_news_sentiment_impact(self, symbol: str) -> float:
 
 
 
-class TechnicalAnalysisEngine:
-    """Advanced technical analysis with professional-grade calculations"""
-    
-    def __init__(self):
-        self.indicators_cache = {}
-        self.cache_timeout = 60  # 1 minute cache
-        
-    def calculate_all_indicators(self, df: pd.DataFrame) -> Dict:
-        """Calculate comprehensive technical indicators"""
-        try:
-            if len(df) < 20:
-                return self._get_default_indicators()
-            
-            indicators = {}
-            
-            # Moving Averages
-            indicators.update(self._calculate_moving_averages(df))
-            
-            # Momentum Indicators
-            indicators.update(self._calculate_momentum_indicators(df))
-            
-            # Volatility Indicators
-            indicators.update(self._calculate_volatility_indicators(df))
-            
-            # Trend Indicators
-            indicators.update(self._calculate_trend_indicators(df))
-            
-            # Volume Indicators (if available)
-            indicators.update(self._calculate_volume_indicators(df))
-            
-            # Support/Resistance Levels
-            indicators.update(self._calculate_support_resistance(df))
-            
-            # Pattern Recognition
-            indicators.update(self._detect_patterns(df))
-            
-            return indicators
-            
-        except Exception as e:
-            logging.error(f"Technical analysis calculation error: {e}")
-            return self._get_default_indicators()
-    
-    def _calculate_moving_averages(self, df: pd.DataFrame) -> Dict:
-        """Calculate various moving averages"""
-        try:
-            close = df['close']
-            
-            # Simple Moving Averages
-            sma_5 = close.rolling(window=5).mean()
-            sma_10 = close.rolling(window=10).mean()
-            sma_20 = close.rolling(window=20).mean()
-            sma_50 = close.rolling(window=50).mean() if len(df) >= 50 else sma_20
-            
-            # Exponential Moving Averages
-            ema_12 = close.ewm(span=12).mean()
-            ema_26 = close.ewm(span=26).mean()
-            ema_50 = close.ewm(span=50).mean() if len(df) >= 50 else ema_26
-            
-            # Volume Weighted MA (if volume available)
-            if 'volume' in df.columns and not df['volume'].isna().all():
-                vwma = (close * df['volume']).rolling(20).sum() / df['volume'].rolling(20).sum()
-            else:
-                vwma = sma_20
-            
-            return {
-                'sma_5': float(sma_5.iloc[-1]) if not sma_5.isna().iloc[-1] else float(close.iloc[-1]),
-                'sma_10': float(sma_10.iloc[-1]) if not sma_10.isna().iloc[-1] else float(close.iloc[-1]),
-                'sma_20': float(sma_20.iloc[-1]) if not sma_20.isna().iloc[-1] else float(close.iloc[-1]),
-                'sma_50': float(sma_50.iloc[-1]) if not sma_50.isna().iloc[-1] else float(close.iloc[-1]),
-                'ema_12': float(ema_12.iloc[-1]) if not ema_12.isna().iloc[-1] else float(close.iloc[-1]),
-                'ema_26': float(ema_26.iloc[-1]) if not ema_26.isna().iloc[-1] else float(close.iloc[-1]),
-                'ema_50': float(ema_50.iloc[-1]) if not ema_50.isna().iloc[-1] else float(close.iloc[-1]),
-                'vwma_20': float(vwma.iloc[-1]) if not vwma.isna().iloc[-1] else float(close.iloc[-1])
-            }
-        except:
-            close_price = float(df['close'].iloc[-1])
-            return {
-                'sma_5': close_price, 'sma_10': close_price, 'sma_20': close_price, 'sma_50': close_price,
-                'ema_12': close_price, 'ema_26': close_price, 'ema_50': close_price, 'vwma_20': close_price
-            }
-    
-    def _calculate_momentum_indicators(self, df: pd.DataFrame) -> Dict:
-        """Calculate momentum indicators"""
-        try:
-            close = df['close']
-            high = df['high']
-            low = df['low']
-            
-            # RSI
-            delta = close.diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rs = gain / loss
-            rsi = 100 - (100 / (1 + rs))
-            
-            # Stochastic
-            low_14 = low.rolling(window=14).min()
-            high_14 = high.rolling(window=14).max()
-            k_percent = 100 * (close - low_14) / (high_14 - low_14)
-            d_percent = k_percent.rolling(window=3).mean()
-            
-            # MACD
-            ema_12 = close.ewm(span=12).mean()
-            ema_26 = close.ewm(span=26).mean()
-            macd_line = ema_12 - ema_26
-            macd_signal = macd_line.ewm(span=9).mean()
-            macd_histogram = macd_line - macd_signal
-            
-            # CCI
-            typical_price = (high + low + close) / 3
-            sma_tp = typical_price.rolling(window=20).mean()
-            mean_deviation = typical_price.rolling(window=20).apply(lambda x: np.mean(np.abs(x - x.mean())))
-            cci = (typical_price - sma_tp) / (0.015 * mean_deviation)
-            
-            # Williams %R
-            williams_r = -100 * (high_14 - close) / (high_14 - low_14)
-            
-            return {
-                'rsi': float(rsi.iloc[-1]) if not rsi.isna().iloc[-1] else 50.0,
-                'stoch_k': float(k_percent.iloc[-1]) if not k_percent.isna().iloc[-1] else 50.0,
-                'stoch_d': float(d_percent.iloc[-1]) if not d_percent.isna().iloc[-1] else 50.0,
-                'macd': float(macd_line.iloc[-1]) if not macd_line.isna().iloc[-1] else 0.0,
-                'macd_signal': float(macd_signal.iloc[-1]) if not macd_signal.isna().iloc[-1] else 0.0,
-                'macd_histogram': float(macd_histogram.iloc[-1]) if not macd_histogram.isna().iloc[-1] else 0.0,
-                'cci': float(cci.iloc[-1]) if not cci.isna().iloc[-1] else 0.0,
-                'williams_r': float(williams_r.iloc[-1]) if not williams_r.isna().iloc[-1] else -50.0
-            }
-        except:
-            return {
-                'rsi': 50.0, 'stoch_k': 50.0, 'stoch_d': 50.0, 'macd': 0.0,
-                'macd_signal': 0.0, 'macd_histogram': 0.0, 'cci': 0.0, 'williams_r': -50.0
-            }
-    
-    def _calculate_volatility_indicators(self, df: pd.DataFrame) -> Dict:
-        """Calculate volatility indicators"""
-        try:
-            close = df['close']
-            high = df['high']
-            low = df['low']
-            
-            # Bollinger Bands
-            sma_20 = close.rolling(window=20).mean()
-            std_20 = close.rolling(window=20).std()
-            bb_upper = sma_20 + (std_20 * 2)
-            bb_lower = sma_20 - (std_20 * 2)
-            bb_position = (close - bb_lower) / (bb_upper - bb_lower)
-            
-            # ATR (Average True Range)
-            tr1 = high - low
-            tr2 = abs(high - close.shift(1))
-            tr3 = abs(low - close.shift(1))
-            true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-            atr = true_range.rolling(window=14).mean()
-            
-            # Historical Volatility
-            returns = close.pct_change()
-            historical_vol = returns.rolling(window=20).std() * np.sqrt(252)  # Annualized
-            
-            # Keltner Channels
-            kc_middle = close.ewm(span=20).mean()
-            kc_upper = kc_middle + (atr * 2)
-            kc_lower = kc_middle - (atr * 2)
-            
-            return {
-                'bb_upper': float(bb_upper.iloc[-1]) if not bb_upper.isna().iloc[-1] else float(close.iloc[-1] * 1.02),
-                'bb_middle': float(sma_20.iloc[-1]) if not sma_20.isna().iloc[-1] else float(close.iloc[-1]),
-                'bb_lower': float(bb_lower.iloc[-1]) if not bb_lower.isna().iloc[-1] else float(close.iloc[-1] * 0.98),
-                'bb_position': float(bb_position.iloc[-1]) if not bb_position.isna().iloc[-1] else 0.5,
-                'atr': float(atr.iloc[-1]) if not atr.isna().iloc[-1] else float(close.iloc[-1] * 0.01),
-                'historical_vol': float(historical_vol.iloc[-1]) if not historical_vol.isna().iloc[-1] else 0.2,
-                'kc_upper': float(kc_upper.iloc[-1]) if not kc_upper.isna().iloc[-1] else float(close.iloc[-1] * 1.015),
-                'kc_lower': float(kc_lower.iloc[-1]) if not kc_lower.isna().iloc[-1] else float(close.iloc[-1] * 0.985)
-            }
-        except:
-            close_price = float(df['close'].iloc[-1])
-            return {
-                'bb_upper': close_price * 1.02, 'bb_middle': close_price, 'bb_lower': close_price * 0.98,
-                'bb_position': 0.5, 'atr': close_price * 0.01, 'historical_vol': 0.2,
-                'kc_upper': close_price * 1.015, 'kc_lower': close_price * 0.985
-            }
-    
-    def _calculate_trend_indicators(self, df: pd.DataFrame) -> Dict:
-        """Calculate trend indicators"""
-        try:
-            close = df['close']
-            high = df['high']
-            low = df['low']
-            
-            # ADX (Average Directional Index)
-            plus_dm = high.diff()
-            minus_dm = low.diff()
-            plus_dm[plus_dm < 0] = 0
-            minus_dm[minus_dm > 0] = 0
-            minus_dm = abs(minus_dm)
-            
-            tr = pd.concat([high - low, abs(high - close.shift(1)), abs(low - close.shift(1))], axis=1).max(axis=1)
-            atr = tr.rolling(window=14).mean()
-            
-            plus_di = 100 * (plus_dm.rolling(window=14).mean() / atr)
-            minus_di = 100 * (minus_dm.rolling(window=14).mean() / atr)
-            dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
-            adx = dx.rolling(window=14).mean()
-            
-            # Parabolic SAR (simplified)
-            psar = close.copy()  # Simplified version
-            
-            # Ichimoku components (simplified)
-            high_9 = high.rolling(window=9).max()
-            low_9 = low.rolling(window=9).min()
-            tenkan_sen = (high_9 + low_9) / 2
-            
-            high_26 = high.rolling(window=26).max()
-            low_26 = low.rolling(window=26).min()
-            kijun_sen = (high_26 + low_26) / 2
-            
-            return {
-                'adx': float(adx.iloc[-1]) if not adx.isna().iloc[-1] else 25.0,
-                'plus_di': float(plus_di.iloc[-1]) if not plus_di.isna().iloc[-1] else 25.0,
-                'minus_di': float(minus_di.iloc[-1]) if not minus_di.isna().iloc[-1] else 25.0,
-                'psar': float(psar.iloc[-1]) if not psar.isna().iloc[-1] else float(close.iloc[-1]),
-                'tenkan_sen': float(tenkan_sen.iloc[-1]) if not tenkan_sen.isna().iloc[-1] else float(close.iloc[-1]),
-                'kijun_sen': float(kijun_sen.iloc[-1]) if not kijun_sen.isna().iloc[-1] else float(close.iloc[-1]),
-                'trend_strength': self._calculate_trend_strength(df)
-            }
-        except:
-            close_price = float(df['close'].iloc[-1])
-            return {
-                'adx': 25.0, 'plus_di': 25.0, 'minus_di': 25.0, 'psar': close_price,
-                'tenkan_sen': close_price, 'kijun_sen': close_price, 'trend_strength': 0.5
-            }
-    
-    def _calculate_volume_indicators(self, df: pd.DataFrame) -> Dict:
-        """Calculate volume indicators"""
-        try:
-            close = df['close']
-            
-            if 'volume' in df.columns and not df['volume'].isna().all():
-                volume = df['volume']
-                
-                # On Balance Volume
-                obv = (volume * ((close > close.shift(1)).astype(int) - (close < close.shift(1)).astype(int))).cumsum()
-                
-                # Volume SMA
-                volume_sma = volume.rolling(window=20).mean()
-                
-                # Volume Rate of Change
-                volume_roc = volume.pct_change(periods=10)
-                
-                return {
-                    'obv': float(obv.iloc[-1]) if not obv.isna().iloc[-1] else 0.0,
-                    'volume_sma': float(volume_sma.iloc[-1]) if not volume_sma.isna().iloc[-1] else 1000.0,
-                    'volume_roc': float(volume_roc.iloc[-1]) if not volume_roc.isna().iloc[-1] else 0.0,
-                    'volume_ratio': float(volume.iloc[-1] / volume_sma.iloc[-1]) if not volume_sma.isna().iloc[-1] and volume_sma.iloc[-1] > 0 else 1.0
-                }
-            else:
-                return {
-                    'obv': 0.0,
-                    'volume_sma': 1000.0,
-                    'volume_roc': 0.0,
-                    'volume_ratio': 1.0
-                }
-        except:
-            return {
-                'obv': 0.0,
-                'volume_sma': 1000.0,
-                'volume_roc': 0.0,
-                'volume_ratio': 1.0
-            }
-    
-    def _calculate_support_resistance(self, df: pd.DataFrame) -> Dict:
-        """Calculate support and resistance levels"""
-        try:
-            high = df['high'].values
-            low = df['low'].values
-            close = df['close'].values
-            
-            # Find pivot points (simplified)
-            window = min(10, len(high) // 4)
-            
-            # Resistance levels (local maxima)
-            resistance_indices, _ = find_peaks(high, distance=window)
-            resistance_levels = high[resistance_indices] if len(resistance_indices) > 0 else [max(high)]
-            
-            # Support levels (local minima)
-            support_indices, _ = find_peaks(-low, distance=window)
-            support_levels = low[support_indices] if len(support_indices) > 0 else [min(low)]
-            
-            current_price = close[-1]
-            
-            # Find nearest levels
-            resistance_levels = [r for r in resistance_levels if r > current_price]
-            support_levels = [s for s in support_levels if s < current_price]
-            
-            nearest_resistance = min(resistance_levels) if resistance_levels else current_price * 1.02
-            nearest_support = max(support_levels) if support_levels else current_price * 0.98
-            
-            return {
-                'nearest_resistance': float(nearest_resistance),
-                'nearest_support': float(nearest_support),
-                'resistance_strength': len([r for r in resistance_levels if abs(r - nearest_resistance) / current_price < 0.005]),
-                'support_strength': len([s for s in support_levels if abs(s - nearest_support) / current_price < 0.005])
-            }
-        except:
-            current_price = float(df['close'].iloc[-1])
-            return {
-                'nearest_resistance': current_price * 1.02,
-                'nearest_support': current_price * 0.98,
-                'resistance_strength': 1,
-                'support_strength': 1
-            }
-    
-    def _detect_patterns(self, df: pd.DataFrame) -> Dict:
-        """Detect candlestick patterns"""
-        try:
-            if len(df) < 3:
-                return {'doji': 0.0, 'hammer': 0.0, 'engulfing_bull': 0.0, 'engulfing_bear': 0.0}
-            
-            latest = df.iloc[-1]
-            prev = df.iloc[-2]
-            
-            open_price = latest['open']
-            high_price = latest['high']
-            low_price = latest['low']
-            close_price = latest['close']
-            
-            body_size = abs(close_price - open_price)
-            total_range = high_price - low_price
-            upper_shadow = high_price - max(open_price, close_price)
-            lower_shadow = min(open_price, close_price) - low_price
-            
-            # Doji pattern
-            doji_score = 1.0 - (body_size / total_range) if total_range > 0 else 0.0
-            
-            # Hammer pattern
-            hammer_score = 0.0
-            if total_range > 0:
-                hammer_score = (lower_shadow / total_range) * (1 - body_size / total_range)
-                if lower_shadow > body_size * 2 and upper_shadow < body_size:
-                    hammer_score *= 2
-            
-            # Engulfing patterns
-            engulfing_bull = 0.0
-            engulfing_bear = 0.0
-            
-            if close_price > open_price and prev['close'] < prev['open']:  # Current green, prev red
-                if open_price < prev['close'] and close_price > prev['open']:
-                    engulfing_bull = 1.0
-            
-            if close_price < open_price and prev['close'] > prev['open']:  # Current red, prev green
-                if open_price > prev['close'] and close_price < prev['open']:
-                    engulfing_bear = 1.0
-            
-            return {
-                'doji': min(1.0, max(0.0, doji_score)),
-                'hammer': min(1.0, max(0.0, hammer_score)),
-                'engulfing_bull': engulfing_bull,
-                'engulfing_bear': engulfing_bear
-            }
-        except:
-            return {'doji': 0.0, 'hammer': 0.0, 'engulfing_bull': 0.0, 'engulfing_bear': 0.0}
-    
-    def _calculate_trend_strength(self, df: pd.DataFrame) -> float:
-        """Calculate overall trend strength"""
-        try:
-            close = df['close']
-            
-            # Multiple timeframe trend alignment
-            sma_5 = close.rolling(5).mean().iloc[-1]
-            sma_10 = close.rolling(10).mean().iloc[-1]
-            sma_20 = close.rolling(20).mean().iloc[-1]
-            current_price = close.iloc[-1]
-            
-            # Check trend alignment
-            uptrend_alignment = sma_5 > sma_10 > sma_20 and current_price > sma_5
-            downtrend_alignment = sma_5 < sma_10 < sma_20 and current_price < sma_5
-            
-            if uptrend_alignment:
-                return 1.0
-            elif downtrend_alignment:
-                return 0.0
-            else:
-                return 0.5
-        except:
-            return 0.5
-    
-    def _get_default_indicators(self) -> Dict:
-        """Return default indicators if calculation fails"""
-        return {
-            'sma_5': 100.0, 'sma_10': 100.0, 'sma_20': 100.0, 'sma_50': 100.0,
-            'ema_12': 100.0, 'ema_26': 100.0, 'ema_50': 100.0, 'vwma_20': 100.0,
-            'rsi': 50.0, 'stoch_k': 50.0, 'stoch_d': 50.0, 'macd': 0.0,
-            'macd_signal': 0.0, 'macd_histogram': 0.0, 'cci': 0.0, 'williams_r': -50.0,
-            'bb_upper': 102.0, 'bb_middle': 100.0, 'bb_lower': 98.0, 'bb_position': 0.5,
-            'atr': 1.0, 'historical_vol': 0.2, 'kc_upper': 101.5, 'kc_lower': 98.5,
-            'adx': 25.0, 'plus_di': 25.0, 'minus_di': 25.0, 'psar': 100.0,
-            'tenkan_sen': 100.0, 'kijun_sen': 100.0, 'trend_strength': 0.5,
-            'obv': 0.0, 'volume_sma': 1000.0, 'volume_roc': 0.0, 'volume_ratio': 1.0,
-            'nearest_resistance': 102.0, 'nearest_support': 98.0,
-            'resistance_strength': 1, 'support_strength': 1,
-            'doji': 0.0, 'hammer': 0.0, 'engulfing_bull': 0.0, 'engulfing_bear': 0.0
-        }
-
-class MarketDataProvider:
-    """Enhanced market data provider with multiple sources"""
-    
-    def __init__(self):
-        self.symbols_map = {
-            'R_50': '^GSPC',  # S&P 500 as proxy
-            'R_75': '^GSPC',
-            'R_100': '^GSPC',
-            'BOOM500': 'BTC-USD',  # Bitcoin as volatile asset proxy
-            'CRASH500': 'BTC-USD',
-            'BOOM1000': 'BTC-USD',
-            'CRASH1000': 'BTC-USD',
-            'Step_200': 'ETH-USD',
-            'Step_500': 'ETH-USD'
-        }
-        self.cache = {}
-        self.cache_timeout = 300  # 5 minutes
-        self.synthetic_data_cache = {}
-        
-    def get_market_data(self, symbol: str, period: str = '1mo', interval: str = '1h') -> pd.DataFrame:
-        """Fetch market data with fallback to synthetic data"""
-        cache_key = f"{symbol}_{period}_{interval}"
-        
-        # Check cache first
-        if cache_key in self.cache:
-            cached_data, timestamp = self.cache[cache_key]
-            if time.time() - timestamp < self.cache_timeout:
-                return cached_data
-        
-        # Try to get real data first
-        if YFINANCE_AVAILABLE:
-            data = self._get_real_market_data(symbol, period, interval)
-            if data is not None and len(data) > 20:
-                self.cache[cache_key] = (data, time.time())
-                return data
-        
-        # Fallback to synthetic data
-        logging.info(f"Using synthetic data for {symbol}")
-        data = self._generate_synthetic_data(symbol, period, interval)
-        
-        if data is not None:
-            self.cache[cache_key] = (data, time.time())
-            return data
-        
-        # Last resort - return minimal dummy data
-        return self._get_minimal_dummy_data()
-    
-    def _get_real_market_data(self, symbol: str, period: str, interval: str) -> Optional[pd.DataFrame]:
-        """Fetch real market data from Yahoo Finance"""
-        try:
-            proxy_symbol = self.symbols_map.get(symbol, '^GSPC')
-            ticker = yf.Ticker(proxy_symbol)
-            data = ticker.history(period=period, interval=interval)
-            
-            if data.empty:
-                logging.warning(f"No data received for {proxy_symbol}")
-                return None
-            
-            # Standardize column names
-            data.columns = [col.lower() for col in data.columns]
-            data.reset_index(inplace=True)
-            
-            # Add synthetic volume if missing
-            if 'volume' not in data.columns or data['volume'].isna().all():
-                data['volume'] = np.random.randint(1000, 10000, len(data))
-            
-            logging.info(f"Fetched {len(data)} rows for {symbol} (proxy: {proxy_symbol})")
-            return data
-            
-        except Exception as e:
-            logging.error(f"Error fetching real market data for {symbol}: {e}")
-            return None
-    
-    def _generate_synthetic_data(self, symbol: str, period: str, interval: str) -> pd.DataFrame:
-        """Generate realistic synthetic market data"""
-        try:
-            # Determine number of periods
-            period_map = {'1d': 24, '5d': 120, '1mo': 720, '3mo': 2160, '6mo': 4320, '1y': 8760}
-            interval_map = {'1m': 1, '5m': 5, '15m': 15, '1h': 60, '1d': 1440}
-            
-            total_minutes = period_map.get(period, 720) * 60
-            interval_minutes = interval_map.get(interval, 60)
-            num_points = min(1000, max(50, total_minutes // interval_minutes))
-            
-            # Generate timestamps
-            end_time = datetime.now()
-            start_time = end_time - timedelta(minutes=total_minutes)
-            timestamps = pd.date_range(start=start_time, end=end_time, periods=num_points)
-            
-            # Generate price data with realistic characteristics
-            np.random.seed(hash(symbol) % 2147483647)  # Consistent seed per symbol
-            
-            # Base parameters
-            initial_price = 100.0
-            volatility = 0.02 if 'R_' in symbol else 0.05  # Lower vol for synthetics
-            drift = 0.0001  # Slight upward drift
-            
-            # Generate returns
-            returns = np.random.normal(drift, volatility, num_points)
-            
-            # Add autocorrelation for realism
-            for i in range(1, len(returns)):
-                returns[i] += returns[i-1] * 0.1  # Small momentum effect
-            
-            # Generate prices
-            prices = [initial_price]
-            for ret in returns[1:]:
-                prices.append(prices[-1] * (1 + ret))
-            
-            # Generate OHLC data
-            opens = prices[:-1]  # Open is previous close
-            closes = prices[1:]  # Close is current price
-            
-            # Generate highs and lows
-            highs = []
-            lows = []
-            volumes = []
-            
-            for i in range(len(opens)):
-                open_price = opens[i]
-                close_price = closes[i]
-                
-                # High/low based on volatility
-                daily_range = abs(close_price - open_price) * np.random.uniform(1.5, 3.0)
-                high = max(open_price, close_price) + daily_range * np.random.uniform(0, 0.5)
-                low = min(open_price, close_price) - daily_range * np.random.uniform(0, 0.5)
-                
-                highs.append(high)
-                lows.append(max(0, low))  # Prevent negative prices
-                
-                # Volume correlated with price movement
-                price_change = abs(close_price - open_price) / open_price
-                base_volume = 5000
-                volume = int(base_volume * (1 + price_change * 10) * np.random.uniform(0.5, 2.0))
-                volumes.append(volume)
-            
-            # Create DataFrame
-            df = pd.DataFrame({
-                'datetime': timestamps[1:],
-                'open': opens,
-                'high': highs,
-                'low': lows,
-                'close': closes,
-                'volume': volumes
-            })
-            
-            return df
-            
-        except Exception as e:
-            logging.error(f"Error generating synthetic data for {symbol}: {e}")
-            return self._get_minimal_dummy_data()
-    
-    def _get_minimal_dummy_data(self) -> pd.DataFrame:
-        """Generate minimal dummy data as last resort"""
-        dates = pd.date_range(start=datetime.now() - timedelta(hours=24), periods=50, freq='30min')
-        base_price = 100.0
-        
-        data = []
-        for i, date in enumerate(dates):
-            price = base_price + np.sin(i * 0.1) * 2 + np.random.normal(0, 0.5)
-            data.append({
-                'datetime': date,
-                'open': price,
-                'high': price + np.random.uniform(0.1, 0.5),
-                'low': price - np.random.uniform(0.1, 0.5),
-                'close': price + np.random.normal(0, 0.2),
-                'volume': np.random.randint(1000, 5000)
-            })
-        
-        return pd.DataFrame(data)
 
 class MLFeatureEngineer:
     """Advanced feature engineering for ML models"""
