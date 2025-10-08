@@ -511,9 +511,6 @@ class RiskManagementEngine:
             logging.error(f"Risk metrics calculation error: {e}")
             return {'error': str(e)}
 
-
-
-
 class MLTradingEngine:
     """Machine Learning trading engine with simplified models"""
     
@@ -522,6 +519,26 @@ class MLTradingEngine:
         self.cache_timeout = 60  # 1 minute cache
         self.model_ready = False
         
+    def initialize_models(self):
+        """Initialize ML models and prepare the engine"""
+        try:
+            logging.info("Initializing ML Trading Engine...")
+            
+            # Initialize model parameters
+            self.prediction_cache = {}
+            self.last_cache_clear = time.time()
+            
+            # Set model as ready (since we're using heuristic-based approach)
+            self.model_ready = True
+            
+            logging.info("ML Trading Engine initialized successfully")
+            return True
+            
+        except Exception as e:
+            logging.error(f"Failed to initialize ML models: {e}")
+            self.model_ready = False
+            return False
+    
     def predict_market_direction(self, df: pd.DataFrame) -> Dict:
         """Predict market direction using simple heuristics (placeholder for ML)"""
         try:
@@ -603,6 +620,18 @@ class MLTradingEngine:
         except Exception as e:
             logging.error(f"Signal generation error: {e}")
             return {'signal': 'hold', 'strength': 0.0}
+    
+    def clear_cache_if_needed(self):
+        """Clear prediction cache if timeout exceeded"""
+        try:
+            current_time = time.time()
+            if current_time - self.last_cache_clear > self.cache_timeout:
+                self.prediction_cache.clear()
+                self.last_cache_clear = current_time
+        except Exception as e:
+            logging.error(f"Cache clear error: {e}")
+
+
 
 class TechnicalAnalysisEngine:
     """Advanced technical analysis with professional-grade calculations"""
