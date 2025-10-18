@@ -11,3 +11,5 @@ scipy
 scikit-learn
 yfinance
 ta
+gunicorn
+yfinance
