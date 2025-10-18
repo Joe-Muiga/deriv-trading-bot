@@ -3602,5 +3602,21 @@ class MLTradingEngine:
 
 if __name__ == '__main__':
     import os
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    import logging
+    
+    # Set up logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    # Create bot instance - this will automatically start the Flask server
+    bot = AIEnhancedDerivBot()
+    
+    # Keep the main thread alive
+    try:
+        while True:
+            import time
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logging.info("Shutting down bot...")
