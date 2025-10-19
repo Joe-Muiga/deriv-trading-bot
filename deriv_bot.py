@@ -16,6 +16,7 @@ import os
 import time
 import signal
 import sys
+import asyncio
 import threading
 from threading import Thread, Lock
 from flask import Flask, jsonify
@@ -1577,13 +1578,28 @@ class AIEnhancedDerivBot:
                     ping_timeout=10,
                     close_timeout=10
                 )
+
+                # Wait for connection to be established
+logging.info(f"WebSocket connection established to: {self.ws_url}")
+logging.info(f"WebSocket state: {self.websocket.state if hasattr(self.websocket, 'state') else 'unknown'}")
+logging.info(f"Using API token: {self.api_token[:10]}..." if self.api_token else "No API token provided")
+
+# Give the connection a moment to fully establish
+await asyncio.sleep(0.5)
                 
                 # Authorize if token provided
                 if self.api_token:
                     auth_response = await self._send_request({
                         "authorize": self.api_token
                     })
-                    
+                if self.api_token:
+                    logging.info("Attempting to authorize with Deriv API...")
+                    auth_request = {"authorize": self.api_token}
+                    logging.info(f"Authorization request: {auth_request}")
+    
+    auth_response = await self._send_request(auth_request)
+    
+    logging.info(f"Authorization response: {auth_response}")
                     if auth_response.get('error'):
                         logging.error(f"Authorization failed: {auth_response['error']}")
                         return
