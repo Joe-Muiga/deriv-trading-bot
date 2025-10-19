@@ -1590,12 +1590,12 @@ class AIEnhancedDerivBot:
     
      for attempt in range(max_retries):
          try:
-             logging.info(f"Connecting to Deriv API (attempt {attempt + 1}/{max_retries})")
+            logging.info(f"Connecting to Deriv API (attempt {attempt + 1}/{max_retries})")
             
              # Add debug logging BEFORE connection
-             logging.info(f"WebSocket URL: {self.ws_url}")
+            logging.info(f"WebSocket URL: {self.ws_url}")
             
-             self.websocket = await websockets.connect(
+            self.websocket = await websockets.connect(
                  self.ws_url,
                  ping_interval=30,
                  ping_timeout=10,
