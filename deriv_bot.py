@@ -1585,8 +1585,6 @@ class AIEnhancedDerivBot:
         max_retries = 5
         retry_delay = 5
     
-       
-        # ... rest of the code
 
     
     
