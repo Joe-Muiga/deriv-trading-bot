@@ -1585,13 +1585,10 @@ class AIEnhancedDerivBot:
         max_retries = 5
         retry_delay = 5
     
-        for attempt in range(max_retries):
+       :
         # ... rest of the code
 
-    async def _connect_to_deriv(self):
-     """Connect to Deriv WebSocket API"""
-     max_retries = 5
-     retry_delay = 5
+    
     
      for attempt in range(max_retries):
          try:
