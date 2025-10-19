@@ -1568,6 +1568,25 @@ class AIEnhancedDerivBot:
         max_retries = 5
         retry_delay = 5
 
+    async def _connect_to_deriv(self):
+    """Connect to Deriv WebSocket API"""
+    print("=" * 50)
+    print("ATTEMPTING TO CONNECT TO DERIV")
+    print(f"WebSocket URL: {self.ws_url}")
+    print(f"API Token present: {bool(self.api_token)}")
+    print("=" * 50)
+    
+    logging.info("=" * 50)
+    logging.info("ATTEMPTING TO CONNECT TO DERIV")
+    logging.info(f"WebSocket URL: {self.ws_url}")
+    logging.info(f"API Token present: {bool(self.api_token)}")
+    logging.info("=" * 50)
+    
+    max_retries = 5
+    retry_delay = 5
+    
+    for attempt in range(max_retries):
+        # ... rest of the code
 
     async def _connect_to_deriv(self):
      """Connect to Deriv WebSocket API"""
