@@ -1589,34 +1589,34 @@ class AIEnhancedDerivBot:
             )
             
             # Add debug logging AFTER connection
-            logging.info(f"WebSocket connection established successfully")
-            logging.info(f"Connection state: {self.websocket.open}")
+             logging.info(f"WebSocket connection established successfully")
+             logging.info(f"Connection state: {self.websocket.open}")
             
             # Wait briefly for connection to stabilize
-            await asyncio.sleep(0.5)
+             await asyncio.sleep(0.5)
             
             # Authorize if token provided
-            if self.api_token:
-                logging.info(f"Attempting authorization with token: {self.api_token[:10]}...")
-                auth_response = await self._send_request({
-                    "authorize": self.api_token
+             if self.api_token:
+                 logging.info(f"Attempting authorization with token: {self.api_token[:10]}...")
+                 auth_response = await self._send_request({
+                     "authorize": self.api_token
                 })
                 
-                logging.info(f"Authorization response received: {auth_response}")
+                 logging.info(f"Authorization response received: {auth_response}")
                 
-                if auth_response.get('error'):
-                    logging.error(f"Authorization failed: {auth_response['error']}")
-                    return
+                 if auth_response.get('error'):
+                     logging.error(f"Authorization failed: {auth_response['error']}")
+                     return
             
             # If we get here, connection succeeded
-            return
+             return
                     
-        except Exception as e:
-            logging.error(f"Connection attempt {attempt + 1} failed: {e}")
-            if attempt < max_retries - 1:
-                await asyncio.sleep(retry_delay)
-            else:
-                raise
+         except Exception as e:
+             logging.error(f"Connection attempt {attempt + 1} failed: {e}")
+             if attempt < max_retries - 1:
+                 await asyncio.sleep(retry_delay)
+             else:
+                 raise
     
     async def _initialize_account(self):
         """Initialize account information"""
